@@ -1,0 +1,11 @@
+.expo/
+dist/
+build/
+android/app/build/
+ios/Pods/
+node_modules/
+.expo/
+dist/
+build/
+android/app/build/
+ios/Pods/
