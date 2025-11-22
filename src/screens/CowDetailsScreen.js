@@ -1,4 +1,5 @@
-import React, { useRef } from 'react';
+// src/screens/CowDetailsScreen.js
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -8,16 +9,28 @@ import {
   Dimensions,
   TouchableOpacity,
 } from 'react-native';
-import MapView, { Marker } from 'react-native-maps';
+import MapView, { Marker, Polyline } from 'react-native-maps';
 import { useRoute, useNavigation } from '@react-navigation/native';
+import api from '../api/apiClient'; // axios instance (attaches Authorization header)
+
+import BatteryIndicator from '../component/BatteryIndicator';
+import SignalIndicator from '../component/SignalIndicator';
+
+const MAP_TYPES = ['standard', 'satellite', 'hybrid', 'terrain'];
 
 export default function CowDetailsScreen() {
   const route = useRoute();
   const navigation = useNavigation();
   const mapRef = useRef(null);
-  const { cow } = route.params;
+  const { cow } = route.params || {};
 
-  if (!cow || !cow.latest_record) {
+  // local state for API collar-data
+  const [apiData, setApiData] = useState(null);
+  const [trail, setTrail] = useState([]);
+  const [mapTypeIndex, setMapTypeIndex] = useState(1); // default to 'satellite' (index 1)
+
+  // If no data at all
+  if (!cow) {
     return (
       <View style={styles.center}>
         <Text style={styles.errorText}>⚠️ No data available for this cow.</Text>
@@ -25,181 +38,318 @@ export default function CowDetailsScreen() {
     );
   }
 
+  // STATIC DATA PASSED FROM LIST SCREEN
   const {
-    id,
-    cattle_name,
+    cattleId,
+    name,
     breed,
     age,
     weight,
     color,
-    farm_name,
-    cattle_photo,
-    collar_id,
-    latest_record,
+    farmName,
+    address,
+    Image: cattleImage,
+    collarId,
+    healthNotes,
+    latest_record = {},
+    lastSeen: staticLastSeen,
   } = cow;
 
+  // OLD latest_record fields (may be undefined)
   const {
-    latitude,
-    longitude,
+    latitude: old_latitude,
+    longitude: old_longitude,
     body_temperature,
-    battery_voltage,
+    battery_voltage: old_battery_voltage,
     motion_detected,
     rssi,
     health_status,
-    created_at,
-  } = latest_record;
+    created_at: old_created_at,
+  } = latest_record || {};
 
-  const getBatteryColor = (v) =>
-    v > 3.9 ? '#34C759' : v > 3.6 ? '#FF9500' : '#FF3B30';
+  // Helper to trim collarId to deviceId string
+  const deviceId = collarId ? String(collarId).trim() : null;
 
-  const batteryColor = battery_voltage != null ? getBatteryColor(battery_voltage) : '#ccc';
-  const batteryFillPercent = battery_voltage != null
-    ? Math.min(Math.max((battery_voltage - 3.0) / 1.2, 0), 1)
-    : 0;
+  // ---- Fetch collar-data repeatedly (every 1s) silently ----
+  useEffect(() => {
+    let mounted = true;
+    if (!deviceId) return () => { mounted = false; };
 
-  const BatteryIcon = () => (
-    <View style={styles.batteryContainer}>
-      <View style={[styles.batteryBody, { borderColor: batteryColor }]}>
-        <View
-          style={[
-            styles.batteryFill,
-            { backgroundColor: batteryColor, width: `${batteryFillPercent * 100}%` },
-          ]}
-        />
-      </View>
-      <View style={[styles.batteryNub, { backgroundColor: batteryColor }]} />
-    </View>
-  );
+    const fetchCollarData = async () => {
+      try {
+        const res = await api.get(`/api/collar-data/${deviceId}`);
+        const d = res?.data ?? null;
+        if (mounted) setApiData(d);
+      } catch (err) {
+        // intentionally silent: do not show error to user, just keep previous data
+        if (mounted) setApiData(null);
+      }
+    };
 
-  const getSignalBars = (rssi) => {
-    if (rssi == null) return 0;
-    if (rssi >= -50) return 4;
-    if (rssi >= -70) return 3;
-    if (rssi >= -90) return 2;
-    return 1;
+    // initial fetch + interval
+    fetchCollarData();
+    const interval = setInterval(fetchCollarData, 1000);
+
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
+  }, [deviceId]);
+
+  // Extract API fields (if available)
+  const apiLastLocation = apiData?.lastLocation ?? null; // { lat, lon, timestamp }
+  const apiVoltageRaw = apiData?.__v ?? null; // use __v as voltage (0..5)
+  const apiLastSeen = apiData?.lastSeen ?? apiData?.lastLocation?.timestamp ?? null;
+
+  // Also read signal fields if present
+  const gsmRssi = typeof apiData?.gsm_rssi === 'number' ? apiData.gsm_rssi : (apiData?.gsm_rssi ?? null);
+  const loraRssi = typeof apiData?.lora_rssi === 'number' ? apiData.lora_rssi : (apiData?.lora_rssi ?? null);
+
+  // Compute displayed location / timestamp with fallbacks
+  const latitude = apiLastLocation?.lat ?? old_latitude ?? null;
+  const longitude = apiLastLocation?.lon ?? old_longitude ?? null;
+  const displayedTimestamp = apiLastSeen ?? staticLastSeen ?? old_created_at ?? null;
+
+  // Battery: prefer API __v (clamped 0..5), fallback to old battery_voltage
+  const batteryVoltage = (() => {
+    if (typeof apiVoltageRaw === 'number') return Math.min(Math.max(apiVoltageRaw, 0), 5);
+    if (typeof old_battery_voltage === 'number') return Math.min(Math.max(old_battery_voltage, 0), 5);
+    return null;
+  })();
+
+  // Map focus helper
+  const handleFocus = () => {
+    if (mapRef.current && latitude != null && longitude != null) {
+      try {
+        mapRef.current.animateToRegion(
+          {
+            latitude: Number(latitude),
+            longitude: Number(longitude),
+            latitudeDelta: 0.005,
+            longitudeDelta: 0.005,
+          },
+          1000
+        );
+      } catch (e) {
+        // ignore animation errors
+      }
+    }
   };
 
-  const signalBars = getSignalBars(rssi);
-  const renderSignalBars = () => (
-    <View style={styles.signalWrapper}>
-      {[1, 2, 3, 4].map(i => (
-        <View
-          key={i}
-          style={[
-            styles.signalBar,
-            {
-              opacity: i <= signalBars ? 1 : 0.2,
-              height: 4 * i,
-            },
-          ]}
-        />
-      ))}
-    </View>
-  );
+  // check location valid
+  const locationAvailable =
+    latitude != null &&
+    longitude != null &&
+    !isNaN(Number(latitude)) &&
+    !isNaN(Number(longitude));
 
-  const handleFocus = () => {
-    if (mapRef.current) {
-      mapRef.current.animateToRegion({
-        latitude: parseFloat(latitude),
-        longitude: parseFloat(longitude),
-        latitudeDelta: 0.005,
-        longitudeDelta: 0.005,
-      }, 1000);
+  // ---- Maintain movement trail (last 10 points) ----
+  useEffect(() => {
+    if (!locationAvailable) return;
+
+    const latNum = Number(latitude);
+    const lonNum = Number(longitude);
+
+    setTrail((prev) => {
+      // avoid duplicates
+      if (prev.length > 0) {
+        const last = prev[prev.length - 1];
+        if (last.latitude === latNum && last.longitude === lonNum) {
+          return prev;
+        }
+      }
+      const next = [...prev, { latitude: latNum, longitude: lonNum }];
+      if (next.length > 10) return next.slice(next.length - 10);
+      return next;
+    });
+  }, [latitude, longitude, locationAvailable]);
+
+  // ---- Smooth map animation whenever displayed location updates (hidden to user) ----
+  useEffect(() => {
+    if (!mapRef.current) return;
+    if (!locationAvailable) return;
+
+    try {
+      mapRef.current.animateToRegion(
+        {
+          latitude: Number(latitude),
+          longitude: Number(longitude),
+          latitudeDelta: 0.005,
+          longitudeDelta: 0.005,
+        },
+        800
+      );
+    } catch (e) {
+      // ignore
     }
+  }, [latitude, longitude, locationAvailable]);
+
+  // Format timestamp to "08:08 AM • 22/11/2025"
+  const formatTimestamp = (isoString) => {
+    if (!isoString) return 'No timestamp';
+    const d = new Date(isoString);
+    if (isNaN(d.getTime())) return 'No timestamp';
+
+    let hours = d.getHours();
+    const minutes = d.getMinutes();
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12;
+    if (hours === 0) hours = 12;
+    const mm = minutes < 10 ? `0${minutes}` : minutes;
+    const timePart = `${hours}:${mm} ${ampm}`;
+
+    const day = d.getDate() < 10 ? `0${d.getDate()}` : d.getDate();
+    const month = d.getMonth() + 1 < 10 ? `0${d.getMonth() + 1}` : d.getMonth() + 1;
+    const datePart = `${day}/${month}/${d.getFullYear()}`;
+
+    return `${timePart} • ${datePart}`;
+  };
+
+  // Map type toggle
+  const nextMapType = () => {
+    setMapTypeIndex((i) => (i + 1) % MAP_TYPES.length);
   };
 
   return (
     <View style={{ flex: 1 }}>
       <ScrollView contentContainerStyle={styles.container}>
-        <Text style={styles.title}>{cattle_name || 'Unnamed Cow'}</Text>
+        {/* NAME */}
+        <Text style={styles.title}>{name || 'Unnamed Cow'}</Text>
 
-        {/* Map Section (moved to top) */}
+        {/* MAP SECTION */}
         <Text style={styles.sectionTitle}>🗺️ Cattle Location</Text>
-        <View style={styles.mapContainer}>
-          <MapView
-            ref={mapRef}
-            style={styles.map}
-            mapType="satellite"
-            initialRegion={{
-              latitude: parseFloat(latitude),
-              longitude: parseFloat(longitude),
-              latitudeDelta: 0.01,
-              longitudeDelta: 0.01,
-            }}
-          >
-            <Marker
-              coordinate={{
-                latitude: parseFloat(latitude),
-                longitude: parseFloat(longitude),
+
+        {!locationAvailable ? (
+          <View style={styles.mapContainer}>
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+              <Text style={{ fontSize: 16, color: '#c00', fontWeight: '600' }}>
+                Location not available
+              </Text>
+            </View>
+          </View>
+        ) : (
+          <View style={styles.mapContainer}>
+            <MapView
+              ref={mapRef}
+              style={styles.map}
+              mapType={MAP_TYPES[mapTypeIndex]}
+              initialRegion={{
+                latitude: Number(latitude),
+                longitude: Number(longitude),
+                latitudeDelta: 0.01,
+                longitudeDelta: 0.01,
               }}
-              title={cattle_name}
-              description={`Lat: ${latitude}, Lon: ${longitude}`}
-            />
-          </MapView>
+            >
+              {/* Movement Trail (polyline) */}
+              {trail.length > 1 && (
+                <Polyline
+                  coordinates={trail}
+                  strokeWidth={4}
+                  strokeColor="#00BFFF"
+                />
+              )}
 
-          <TouchableOpacity style={styles.focusButton} onPress={handleFocus}>
-            <Text style={styles.focusIcon}>🎯</Text>
-          </TouchableOpacity>
-        </View>
+              {/* Cow Marker */}
+              <Marker
+                coordinate={{
+                  latitude: Number(latitude),
+                  longitude: Number(longitude),
+                }}
+                title={name}
+                description={`Lat: ${latitude}, Lon: ${longitude}`}
+              />
+            </MapView>
 
-        
+            {/* small controls over the map (do not alter layout) */}
+            <View style={styles.mapControls}>
+              <TouchableOpacity style={styles.mapControlBtn} onPress={handleFocus}>
+                <Text style={styles.mapControlText}>🎯</Text>
+              </TouchableOpacity>
 
-        {/* Cattle Info */}
+              <TouchableOpacity style={styles.mapControlBtn} onPress={nextMapType}>
+                <Text style={styles.mapControlText}>{MAP_TYPES[mapTypeIndex].toUpperCase()}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
+        {/* CATTLE INFO */}
         <Text style={styles.sectionTitle}>🐄 Cattle Information</Text>
         <View style={styles.rowCardColumn}>
           <View style={styles.infoRow}>
-            <Text style={styles.infoText}>ID: {collar_id || id}</Text>
+            <Text style={styles.infoText}>ID: {cattleId}</Text>
             <Text style={styles.infoText}>Breed: {breed}</Text>
             <Text style={styles.infoText}>Age: {age} yrs</Text>
           </View>
+
           <View style={styles.infoRow}>
             <Text style={styles.infoText}>Weight: {weight} kg</Text>
             <Text style={styles.infoText}>Color: {color}</Text>
-            <Text style={styles.infoText}>Health: N/A</Text>
+            <Text style={styles.infoText}>Health: {healthNotes || 'N/A'}</Text>
           </View>
         </View>
 
-        {/* Farm Info */}
+        {/* FARM INFO */}
         <Text style={styles.sectionTitle}>🏡 Farm Info</Text>
         <View style={styles.rowCard}>
-          <Text style={styles.value}>{farm_name || 'Not available'}</Text>
+          <Text style={styles.value}>{farmName || 'Not available'}</Text>
         </View>
 
-        {/* Collar Data */}
+        {/* COLLAR DATA */}
         <View style={styles.rowBetween}>
           <Text style={styles.sectionTitle}>📟 Collar Data</Text>
-          <Text style={styles.timestampLabel}>⏰ {new Date(created_at).toLocaleString()}</Text>
+          <Text style={styles.timestampLabel}>
+            {displayedTimestamp ? formatTimestamp(displayedTimestamp) : 'No timestamp'}
+          </Text>
         </View>
 
         <View style={styles.rowCard}>
-          <View style={styles.column}><BatteryIcon /></View>
-          <View style={styles.column}>{renderSignalBars()}</View>
           <View style={styles.column}>
-            <View style={[styles.motionDot, { backgroundColor: motion_detected ? '#34C759' : '#FF3B30' }]} />
+            {/* Battery indicator (component) */}
+            <BatteryIndicator voltage={batteryVoltage} />
+          </View>
+
+          <View style={styles.column}>
+            {/* Show GSM and LoRa indicators stacked to preserve the same area
+                They will visually match the old single-signal bars style but show both */}
+            <SignalIndicator rssi={gsmRssi ?? rssi ?? null} label="GSM" />
+            <SignalIndicator rssi={loraRssi ?? rssi ?? null} label="LoRa" />
+          </View>
+
+          <View style={styles.column}>
+            <View
+              style={[
+                styles.motionDot,
+                { backgroundColor: motion_detected ? '#34C759' : '#FF3B30' },
+              ]}
+            />
             <Text style={[styles.label, { marginTop: 6 }]}>Motion</Text>
           </View>
+
           <View style={styles.column}>
-            <Text style={styles.value}>{body_temperature ? `${body_temperature}°C` : 'N/A'}</Text>
+            <Text style={styles.value}>
+              {body_temperature ? `${body_temperature}°C` : 'N/A'}
+            </Text>
             <Text style={[styles.label, { marginTop: 6 }]}>Temp</Text>
           </View>
         </View>
 
-        {/* Alert Section */}
+        {/* ALERT */}
         <Text style={styles.sectionTitle}>⚠️ Alert Info</Text>
         <View style={styles.rowCard}>
           <Text style={styles.value}>{health_status || 'Unknown'}</Text>
         </View>
-        {/* Cow Image */}
-        {cattle_photo && cattle_photo !== 'no' && cattle_photo !== 'No' ? (
-          <Image source={{ uri: cattle_photo }} style={styles.image} />
+
+        {/* IMAGE */}
+        {cattleImage && cattleImage !== 'no' && cattleImage !== 'No' ? (
+          <Image source={{ uri: cattleImage }} style={styles.image} />
         ) : (
           <View style={styles.imagePlaceholder}>
             <Text style={{ color: '#888' }}>No Image Available</Text>
           </View>
         )}
       </ScrollView>
-       
-      {/* Fixed Back Button */}
+
       <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
         <Text style={styles.backText}>⬅️ Back</Text>
       </TouchableOpacity>
@@ -207,20 +357,82 @@ export default function CowDetailsScreen() {
   );
 }
 
+// ---- STYLES (UNCHANGED + small additions for map controls) ----
+
 const styles = StyleSheet.create({
   container: { padding: 16, backgroundColor: '#F2F7FA', paddingBottom: 80 },
-  title: { fontSize: 24, fontWeight: '700', textAlign: 'center', color: '#333', },
+  title: { fontSize: 24, fontWeight: '700', textAlign: 'center', color: '#333' },
   sectionTitle: { fontSize: 18, fontWeight: '600', color: '#4F8EF7', marginVertical: 5 },
-  image: { width: '100%', height: 200, borderRadius: 12, marginBottom: 12 },
-  imagePlaceholder: { width: '100%', height: 200, borderRadius: 12, backgroundColor: '#d8d8d8', justifyContent: 'center', alignItems: 'center', marginBottom: 10 },
-  rowCard: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', backgroundColor: '#fff', padding: 12, borderRadius: 10, marginBottom: 10, elevation: 3 },
-  column: { width: '22%', alignItems: 'center', },
+  image: {
+    width: '100%',
+    height: 200,
+    borderRadius: 12,
+    marginBottom: 12,
+  },
+  imagePlaceholder: {
+    width: '100%',
+    height: 200,
+    borderRadius: 12,
+    backgroundColor: '#d8d8d8',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  rowCard: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    backgroundColor: '#fff',
+    padding: 12,
+    borderRadius: 10,
+    marginBottom: 10,
+    elevation: 3,
+  },
+  column: { width: '22%', alignItems: 'center' },
   label: { fontSize: 16, fontWeight: '600', color: '#666', textAlign: 'center' },
-  value: { fontSize: 14, fontWeight: '500', color: '#111', textAlign: 'center' },
+  value: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#111',
+    textAlign: 'center',
+  },
   motionDot: { width: 14, height: 14, borderRadius: 7, marginBottom: 4 },
-  mapContainer: { width: '100%', height: Dimensions.get('window').height * 0.3, borderRadius: 12, overflow: 'hidden', marginBottom: 20 },
+  mapContainer: {
+    width: '100%',
+    height: Dimensions.get('window').height * 0.3,
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginBottom: 20,
+  },
   map: { width: '100%', height: '100%' },
-  focusButton: { position: 'absolute', bottom: 10, right: 10, backgroundColor: 'white', padding: 10, borderRadius: 20, elevation: 4 },
+  // small overlay controls on the map
+  mapControls: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    flexDirection: 'column',
+    gap: 8,
+  },
+  mapControlBtn: {
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 8,
+    elevation: 4,
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  mapControlText: { fontSize: 12, fontWeight: '700', color: '#333' },
+
+  focusButton: {
+    position: 'absolute',
+    bottom: 10,
+    right: 10,
+    backgroundColor: 'white',
+    padding: 10,
+    borderRadius: 20,
+    elevation: 4,
+  },
   focusIcon: { fontSize: 18 },
   backButton: {
     position: 'absolute',
@@ -236,14 +448,33 @@ const styles = StyleSheet.create({
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   errorText: { fontSize: 16, color: '#c00' },
   batteryContainer: { flexDirection: 'row', alignItems: 'center' },
-  batteryBody: { width: 30, height: 14, borderRadius: 3, borderWidth: 2, overflow: 'hidden', backgroundColor: '#fff' },
+  batteryBody: {
+    width: 30,
+    height: 14,
+    borderRadius: 3,
+    borderWidth: 2,
+    overflow: 'hidden',
+    backgroundColor: '#fff',
+  },
   batteryFill: { height: '100%' },
   batteryNub: { width: 4, height: 8, borderRadius: 1, marginLeft: 2 },
   signalWrapper: { flexDirection: 'row', alignItems: 'flex-end', marginTop: 4 },
   signalBar: { width: 4, backgroundColor: '#333', marginHorizontal: 1, borderRadius: 2 },
   timestampLabel: { fontSize: 12, color: '#333', fontWeight: '500' },
   rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  rowCardColumn: { backgroundColor: '#fff', padding: 12, borderRadius: 10, marginBottom: 14, elevation: 3, },
-  infoRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
-  infoText: { flex: 1, fontSize: 16, fontWeight: '500', color: '#111' ,alignContent: 'center', textAlign: 'center' },
+  rowCardColumn: {
+    backgroundColor: '#fff',
+    padding: 12,
+    borderRadius: 10,
+    marginBottom: 14,
+    elevation: 3,
+  },
+  infoRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10,borderColor: '#0bee88ff'},
+  infoText: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#111',
+    textAlign: 'center',
+  },
 });

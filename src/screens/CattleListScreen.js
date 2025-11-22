@@ -1,4 +1,5 @@
-import React, { useEffect, useState, useContext } from 'react';
+// src/screens/CattleListScreen.js
+import React, { useEffect, useState, useContext, useRef } from 'react';
 import {
   ScrollView,
   StyleSheet,
@@ -10,7 +11,6 @@ import {
   Modal,
   KeyboardAvoidingView,
   Platform,
-  Alert,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,110 +19,86 @@ import FilterScreen from './FilterScreen';
 import { UserContext } from '../context/UserContext';
 
 export default function CattleListScreen() {
-  const { user } = useContext(UserContext);
-  const userId = user?.id;
+  const { user, cattleList, fetchCattle, cattleLoading } = useContext(UserContext);
+  const userId = user?.userId || user?.id || null;
 
-  const [cattleList, setCattleList] = useState([]);
+  const [displayList, setDisplayList] = useState([]);
   const [filteredCattleList, setFilteredCattleList] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [temperatureFilter, setTemperatureFilter] = useState('');
   const [loading, setLoading] = useState(true);
   const [filterModalVisible, setFilterModalVisible] = useState(false);
+
   const navigation = useNavigation();
+  const staticCattleRef = useRef([]);
 
+  // store latest static cattle to ref
   useEffect(() => {
+    staticCattleRef.current = cattleList || [];
+  }, [cattleList]);
+
+  // INITIAL load from context
+  useEffect(() => {
+    let mounted = true;
+
+    const init = async () => {
+      setLoading(true);
+      try {
+        if (!cattleList || cattleList.length === 0) {
+          await fetchCattle?.();
+        }
+        const initial = cattleList || staticCattleRef.current || [];
+        setDisplayList(initial);
+        setFilteredCattleList(initial);
+      } catch (e) {
+        console.log("CattleList init error", e);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+
     if (userId) {
-      fetchData(); // initial fetch
-
-      const interval = setInterval(() => {
-        fetchData();
-      }, 1000); // every 1 second
-
-      return () => clearInterval(interval);
+      init();
     }
-  }, [userId]);
 
-  const fetchData = async () => {
-    try {
-      const [cattleRes, healthRes] = await Promise.all([
-        fetch(`http://100.79.26.84:8000/api/cattle/user/${userId}`),
-        fetch(`http://100.79.26.84:8000/api/cattle/lastdata/latest/${userId}`),
-      ]);
+    return () => { mounted = false };
+  }, [userId, cattleList, fetchCattle]);
 
-      const cattleJson = await cattleRes.json();
-      const healthJson = await healthRes.json();
-
-      const cattleArray = Array.isArray(cattleJson?.data) ? cattleJson.data : [];
-      const healthMap = {};
-      Array.isArray(healthJson) &&
-        healthJson.forEach(item => {
-          if (item?.collar_id) {
-            healthMap[item.collar_id] = item.latest_record;
-          }
-        });
-
-      const merged = cattleArray.map(cow => {
-        const record = healthMap[cow.id];
-        const createdAt = record?.created_at ?? null;
-        const collarOnline = (() => {
-          if (!createdAt) return false;
-          const lastSeenTime = new Date(createdAt).getTime();
-          const now = new Date().getTime();
-          const diffInMinutes = (now - lastSeenTime) / (1000 * 60);
-          return diffInMinutes <= 5;
-        })();
-
-        return {
-          ...cow,
-          latest_record: record || null,
-          helth_notes: record
-            ? `Temp: ${record.body_temperature}°C, Battery: ${record.battery_voltage}V, Health: ${record.health_status || 'N/A'}`
-            : 'Temp: N/A, Battery: N/A, Health: N/A',
-          batteryVoltage: record?.battery_voltage ?? null,
-          temperature: record?.body_temperature ?? null,
-          rssi: record?.rssi ?? null,
-          collarOnline,
-          motionDetected: record?.motion_detected ?? false,
-          lastSeen: createdAt,
-        };
-      });
-
-      setCattleList(merged);
-      handleSearch(searchQuery, temperatureFilter, merged);
-    } catch (e) {
-      console.error(e);
-      Alert.alert('Error', 'Failed to fetch cattle data.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleSearch = (q, tempFilter = temperatureFilter, sourceList = cattleList) => {
-    setSearchQuery(q);
+  // SEARCH + FILTER only on static data
+  const applySearchAndFilter = (q, tempFilter, sourceList = displayList) => {
     setFilteredCattleList(
-      sourceList.filter(item => {
-        const matchQ = item.id.toLowerCase().includes(q.toLowerCase()) ||
-          (item.cattle_name || '').toLowerCase().includes(q.toLowerCase());
+      (sourceList || []).filter(item => {
+        const idVal = (item.id || item.cattleId || '').toString();
+        const nameVal = (item.cattle_name || item.name || '').toString();
 
-        const matchT = tempFilter
-          ? parseFloat(item.temperature) >= parseFloat(tempFilter)
-          : true;
+        const matchesSearch =
+          idVal.toLowerCase().includes(q.toLowerCase()) ||
+          nameVal.toLowerCase().includes(q.toLowerCase());
 
-        return matchQ && matchT;
+        // If you want temperature filter removed completely, tell me — I can remove this too
+        const tempVal = parseFloat(item.temperature ?? 0);
+        const matchesTemp = tempFilter ? tempVal >= parseFloat(tempFilter) : true;
+
+        return matchesSearch && matchesTemp;
       })
     );
   };
 
+  const handleSearch = (q) => {
+    setSearchQuery(q);
+    applySearchAndFilter(q, temperatureFilter);
+  };
+
   const applyFilter = ({ temperature }) => {
     setTemperatureFilter(temperature);
-    handleSearch(searchQuery, temperature);
+    applySearchAndFilter(searchQuery, temperature);
     setFilterModalVisible(false);
   };
 
   const resetFilter = () => {
     setSearchQuery('');
     setTemperatureFilter('');
-    setFilteredCattleList(cattleList);
+    setFilteredCattleList(displayList);
   };
 
   return (
@@ -135,7 +111,7 @@ export default function CattleListScreen() {
           placeholder="Search by ID or name..."
           style={styles.searchInput}
           value={searchQuery}
-          onChangeText={text => handleSearch(text)}
+          onChangeText={handleSearch}
           placeholderTextColor="#888"
         />
         <TouchableOpacity
@@ -147,33 +123,28 @@ export default function CattleListScreen() {
       </View>
 
       <ScrollView style={styles.scrollArea}>
-        {loading ? (
+        {(loading || cattleLoading) ? (
           <ActivityIndicator size="large" color="#4F8EF7" />
         ) : (
           filteredCattleList.map(item => (
             <TouchableOpacity
-              key={item.id}
+              key={(item.id || item.cattleId) + ''}
               onPress={() => navigation.navigate('CowDetails', { cow: item })}
               activeOpacity={0.7}
             >
               <CattleCard
-                cattleId={item.id}
-                name={item.cattle_name}
+                cattleId={item.cattleId || item.id}
+                name={item.cattle_name || item.name}
                 breed={item.breed}
                 age={item.age}
-                healthNotes={item.helth_notes}
-                batteryVoltage={item.batteryVoltage}
-                rssi={item.rssi}
-                cattlePhoto={item.cattle_photo}
-                collarOnline={item.collarOnline}
-                motionDetected={item.motionDetected}
-                lastSeen={item.lastSeen}
+                healthNotes={item.healthNotes || "No health data"}
+                cattlePhoto={item.cattle_photo || item.Image}
               />
             </TouchableOpacity>
           ))
         )}
 
-        {!loading && filteredCattleList.length === 0 && (
+        {!loading && !cattleLoading && filteredCattleList.length === 0 && (
           <Text style={styles.emptyText}>No results.</Text>
         )}
       </ScrollView>
