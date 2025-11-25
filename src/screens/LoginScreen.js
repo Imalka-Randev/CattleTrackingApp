@@ -10,8 +10,9 @@ import {
   Alert,
   StyleSheet,
   Image,
-  ScrollView,
+  // ❌ Removed ScrollView
   useColorScheme,
+  // Note: ScrollView is not imported here
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -87,9 +88,11 @@ export default function LoginScreen() {
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.bg }]}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        // styles.container has flex: 1
         style={[styles.container, { backgroundColor: colors.bg }]}
       >
-        <ScrollView contentContainerStyle={styles.scrollContainer}>
+        {/* Replaced ScrollView with a standard View and applied the scrollContainer styles */}
+        <View style={styles.contentContainer}> 
           <View style={styles.logoContainer}>
             {renderLogo()}
             <Text style={[styles.appName, { color: colors.text }]}>MooMap</Text>
@@ -180,7 +183,7 @@ export default function LoginScreen() {
               </TouchableOpacity>
             </View>
           </View>
-        </ScrollView>
+        </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -189,9 +192,10 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   safeArea: { flex: 1 },
   container: { flex: 1 },
-  scrollContainer: {
-    flexGrow: 1,
-    justifyContent: 'center',
+  // 🔑 NEW: Renamed scrollContainer to contentContainer and kept flexGrow: 1
+  contentContainer: {
+    flexGrow: 1, // Ensures content stretches to fill the height
+    justifyContent: 'center', // Centers content vertically
     padding: 16,
   },
   logoContainer: {

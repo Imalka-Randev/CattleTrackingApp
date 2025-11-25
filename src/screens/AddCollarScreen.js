@@ -8,11 +8,12 @@ import {
   ActivityIndicator,
   Alert,
   StyleSheet,
-  SafeAreaView,
   Modal,
   useColorScheme,
-  Platform
+  // Removed Platform and StatusBar as they are replaced by SafeAreaView
 } from 'react-native';
+// ✅ Import SafeAreaView from 'react-native-safe-area-context'
+import { SafeAreaView } from 'react-native-safe-area-context'; 
 import { useNavigation } from '@react-navigation/native';
 import { UserContext } from '../context/UserContext';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -113,7 +114,8 @@ export default function AddCollarScreen() {
 
   const QRScannerModal = () => (
     <Modal visible={showScanner} animationType="slide">
-      <View style={[styles.scannerContainer, { backgroundColor: colors.bg }]}>
+      {/* SafeAreaView wrapper for Modal content, fixing the syntax error */}
+      <SafeAreaView style={[styles.scannerContainer, { backgroundColor: colors.bg }]}> 
         {permission?.granted ? (
           <>
             <CameraView
@@ -147,13 +149,24 @@ export default function AddCollarScreen() {
             </TouchableOpacity>
           </View>
         )}
-      </View>
+      </SafeAreaView> {/* <-- Correctly closed SafeAreaView */}
     </Modal>
   );
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
-      <ScrollView contentContainerStyle={[styles.container, { backgroundColor: colors.bg }]}>
+    // ✅ Main screen SafeAreaView, excluding the bottom edge
+    <SafeAreaView 
+      style={{ flex: 1, backgroundColor: colors.bg }}
+      edges={['top', 'left', 'right']} 
+    >
+      <ScrollView 
+        style={{ flex: 1 }}
+        contentContainerStyle={[
+          styles.container, 
+          { backgroundColor: colors.bg }
+          // Removed manual safeAreaTopPadding style
+        ]}
+      >
         <View style={[styles.headerContainer, { backgroundColor: colors.card }]}>
           <TouchableOpacity 
             onPress={() => navigation.goBack()}

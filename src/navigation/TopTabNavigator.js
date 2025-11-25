@@ -4,26 +4,27 @@ import {
   TouchableOpacity,
   Text,
   StyleSheet,
-  SafeAreaView,
   Platform,
   StatusBar,
   Animated,
   useColorScheme,
-  Vibration
+  Vibration,
+  ScrollView,
 } from "react-native";
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons'; 
 import MapScreen from "../screens/MapScreen";
 import CattleListScreen from "../screens/CattleListScreen";
 
 const BUTTON_HEIGHT = 44;
+const TABS = ["map", "cattles", "summary", "community"]; 
 
 function TopTabNavigator() {
   const [activeTab, setActiveTab] = useState("map");
   const [fadeAnim] = useState(new Animated.Value(0));
-  const [indicatorPos] = useState(new Animated.Value(0));
   const colorScheme = useColorScheme();
 
   const renderContent = () => {
+    // This is where the main screen content is rendered based on the active tab
     if (activeTab === "map") {
       return <MapScreen />;
     } else if (activeTab === "summary") {
@@ -48,20 +49,35 @@ function TopTabNavigator() {
       );
     } else if (activeTab === "cattles") {
       return <CattleListScreen />;
+    } else if (activeTab === "community") {
+      return (
+        <View style={[
+          styles.card,
+          colorScheme === 'dark' && styles.darkCard
+        ]}>
+          <Text style={[
+            styles.cardTitle,
+            colorScheme === 'dark' && styles.darkText
+          ]}>👥 Community Hub</Text>
+          <Text style={[
+            styles.cardText,
+            colorScheme === 'dark' && styles.darkSubText
+          ]}>Connect with other farmers!</Text>
+          <Text style={[
+            styles.cardText,
+            colorScheme === 'dark' && styles.darkSubText
+          ]}>Share tips, news, and best practices.</Text>
+        </View>
+      );
     }
     return null;
   };
 
   useEffect(() => {
+    // Simple fade animation for content view when switching tabs
     Animated.timing(fadeAnim, {
       toValue: 1,
       duration: 300,
-      useNativeDriver: true,
-    }).start();
-    
-    const tabIndex = ["map", "cattles", "summary"].indexOf(activeTab);
-    Animated.spring(indicatorPos, {
-      toValue: tabIndex * (100 + 16),
       useNativeDriver: true,
     }).start();
   }, [activeTab]);
@@ -74,63 +90,77 @@ function TopTabNavigator() {
   }, []);
 
   const renderTabButton = useCallback((tabKey) => {
-    const iconName = {
-      map: 'map',
-      cattles: 'paw',
-      summary: 'stats-chart'
+    // Define the icon name AND the component (library) for each tab
+    const iconDetails = {
+      map: { name: 'map', Component: Ionicons },
+      cattles: { name: 'cow', Component: MaterialCommunityIcons },
+      summary: { name: 'stats-chart', Component: Ionicons },
+      community: { name: 'people', Component: Ionicons }
     }[tabKey];
+
+    const IconComponent = iconDetails.Component;
+    const iconName = iconDetails.name;
+    const isActive = activeTab === tabKey;
     
+    // Determine icon color based on active state and color scheme
+    const iconColor = isActive 
+      ? '#FFF' 
+      : (colorScheme === 'dark' ? '#8B4513' : '#27AE60');
+    
+    // Determine text style dynamically
+    const textStyle = [
+      styles.buttonText,
+      isActive ? styles.activeText : styles.inactiveText,
+      !isActive && colorScheme === 'dark' && styles.darkInactiveText
+    ];
+
     return (
       <TouchableOpacity
         key={tabKey}
         accessible={true}
         accessibilityLabel={`${tabKey} tab`}
         accessibilityRole="button"
-        accessibilityState={{ selected: activeTab === tabKey }}
+        accessibilityState={{ selected: isActive }}
         style={[
           styles.button,
-          activeTab === tabKey ? styles.activeButton : styles.inactiveButton,
-          colorScheme === 'dark' && activeTab !== tabKey && styles.darkInactiveButton
+          isActive ? styles.activeButton : styles.inactiveButton,
+          !isActive && colorScheme === 'dark' && styles.darkInactiveButton
         ]}
         onPress={() => handleTabPress(tabKey)}
       >
-        <Ionicons 
+        <IconComponent 
           name={iconName} 
           size={18} 
-          color={activeTab === tabKey ? '#FFF' : '#27AE60'} 
+          color={iconColor} 
           style={{ marginRight: 6 }} 
         />
-        <Text
-          style={[
-            styles.buttonText,
-            activeTab === tabKey ? styles.activeText : styles.inactiveText,
-            colorScheme === 'dark' && activeTab !== tabKey && styles.darkInactiveText
-          ]}
-        >
+        <Text style={textStyle}>
           {tabKey.charAt(0).toUpperCase() + tabKey.slice(1)}
         </Text>
       </TouchableOpacity>
     );
-  }, [activeTab, colorScheme]);
+  }, [activeTab, colorScheme, handleTabPress]);
 
   return (
-    <SafeAreaView style={[
-      styles.safeArea,
-      colorScheme === 'dark' && styles.darkSafeArea
+    // Root View container
+    <View style={[
+      styles.container, // New name for root container style (flex: 1)
+      colorScheme === 'dark' && styles.darkContainer
     ]}>
-      <View style={[
-        styles.container,
-        colorScheme === 'dark' && styles.darkContainer
-      ]}>
-        {["map", "cattles", "summary"].map(renderTabButton)}
-        <Animated.View style={[
-          styles.indicator,
-          {
-            transform: [{ translateX: indicatorPos }],
-            backgroundColor: colorScheme === 'dark' ? '#8B4513' : '#27AE60'
-          }
-        ]} />
-      </View>
+      {/* ScrollView for horizontal scrolling tabs */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={[
+          styles.tabBarWrapper,
+          colorScheme === 'dark' && styles.darkTabBarWrapper
+        ]}
+        contentContainerStyle={styles.tabContentContainer}
+      >
+        {TABS.map(renderTabButton)}
+      </ScrollView>
+
+      {/* Animated content view */}
       <Animated.View style={[
         styles.content,
         { opacity: fadeAnim },
@@ -138,41 +168,46 @@ function TopTabNavigator() {
       ]}>
         {renderContent()}
       </Animated.View>
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
+  // ⭐️ Renamed and clarified root container style
+  container: { 
     flex: 1,
     backgroundColor: "#FFFDF6",
-    paddingTop: Platform.OS === "android" ? StatusBar.currentHeight : 0,
+    // Manually handle Android status bar padding for a full-screen app container
+    paddingTop: Platform.OS === "android" ? StatusBar.currentHeight : 0, 
   },
-  darkSafeArea: {
+  darkContainer: {
     backgroundColor: '#121212',
   },
-  container: {
-    flexDirection: "row",
-    justifyContent: "space-around",
-    alignItems: "center",
-    height: BUTTON_HEIGHT + 16,
-    paddingVertical: 8,
-    paddingHorizontal: Platform.select({ ios: 0, android: 8 }),
+  // Removed old 'safeArea' and 'darkSafeArea' styles
+  
+  tabBarWrapper: {
+    maxHeight: BUTTON_HEIGHT + 16,
     backgroundColor: "#FFFDF6",
     borderBottomWidth: 1,
     borderBottomColor: "#E0D7C6",
   },
-  darkContainer: {
+  darkTabBarWrapper: {
     backgroundColor: '#1E1E1E',
     borderBottomColor: '#333',
+  },
+  tabContentContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 8,
+    paddingHorizontal: 8,
   },
   button: {
     flexDirection: 'row',
     height: BUTTON_HEIGHT,
-    minWidth: Platform.select({ ios: 90, android: 80 }),
-    paddingHorizontal: Platform.select({ ios: 24, android: 16 }),
+    minWidth: Platform.select({ ios: 100, android: 90 }), 
+    paddingHorizontal: Platform.select({ ios: 18, android: 12 }),
     borderRadius: BUTTON_HEIGHT / 2,
-    marginHorizontal: 5,
+    marginHorizontal: 4,
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 1,
@@ -200,6 +235,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "bold",
     textAlign: "center",
+    whiteSpace: 'nowrap',
   },
   activeText: {
     color: "#FFFFFF",
@@ -209,13 +245,6 @@ const styles = StyleSheet.create({
   },
   darkInactiveText: {
     color: '#8B4513',
-  },
-  indicator: {
-    position: 'absolute',
-    height: 3,
-    width: 100,
-    bottom: -8,
-    borderRadius: 2,
   },
   content: {
     flex: 1,

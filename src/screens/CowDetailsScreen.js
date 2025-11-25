@@ -11,12 +11,14 @@ import {
 } from 'react-native';
 import MapView, { Marker, Polyline } from 'react-native-maps';
 import { useRoute, useNavigation } from '@react-navigation/native';
-import api from '../api/apiClient'; // axios instance (attaches Authorization header)
+import AsyncStorage from '@react-native-async-storage/async-storage'; // <--- NEW IMPORT
+import { Ionicons, MaterialCommunityIcons, FontAwesome5 } from '@expo/vector-icons'; // Ensure MaterialCommunityIcons is imported
+import api from '../api/apiClient';
 
 import BatteryIndicator from '../component/BatteryIndicator';
 import SignalIndicator from '../component/SignalIndicator';
 
-const MAP_TYPES = ['standard', 'satellite', 'hybrid', 'terrain'];
+// const MAP_TYPES = ['standard', 'satellite', 'hybrid', 'terrain']; // Removed as we use string state now
 
 export default function CowDetailsScreen() {
   const route = useRoute();
@@ -27,7 +29,8 @@ export default function CowDetailsScreen() {
   // local state for API collar-data
   const [apiData, setApiData] = useState(null);
   const [trail, setTrail] = useState([]);
-  const [mapTypeIndex, setMapTypeIndex] = useState(1); // default to 'satellite' (index 1)
+  const [mapType, setMapType] = useState('satellite'); // default to 'satellite'
+  const [markerColor, setMarkerColor] = useState('#4F8EF7'); // <--- NEW STATE for custom color
 
   // If no data at all
   if (!cow) {
@@ -53,6 +56,7 @@ export default function CowDetailsScreen() {
     healthNotes,
     latest_record = {},
     lastSeen: staticLastSeen,
+    id: cowId, // Use 'id' as a fallback key
   } = cow;
 
   // OLD latest_record fields (may be undefined)
@@ -69,6 +73,27 @@ export default function CowDetailsScreen() {
 
   // Helper to trim collarId to deviceId string
   const deviceId = collarId ? String(collarId).trim() : null;
+
+
+  // ---- Load Custom Marker Color from AsyncStorage ----
+  useEffect(() => {
+    const loadMarkerColor = async () => {
+      try {
+        const stored = await AsyncStorage.getItem('cattleColors');
+        const colorMap = stored ? JSON.parse(stored) : {};
+        // Use cattleId as the key, falling back to cowId if cattleId isn't present
+        const key = cattleId || cowId;
+        if (key && colorMap[key]) {
+          setMarkerColor(colorMap[key]);
+        }
+      } catch (e) {
+        console.error('Error loading marker color from AsyncStorage', e);
+      }
+    };
+
+    loadMarkerColor();
+  }, [cattleId, cowId]); // Run once when cow data loads
+
 
   // ---- Fetch collar-data repeatedly (every 1s) silently ----
   useEffect(() => {
@@ -205,9 +230,23 @@ export default function CowDetailsScreen() {
     return `${timePart} • ${datePart}`;
   };
 
-  // Map type toggle
-  const nextMapType = () => {
-    setMapTypeIndex((i) => (i + 1) % MAP_TYPES.length);
+  const renderIcon = (type, color, size) => {
+    const mapTypeIcons = {
+      standard: { icon: 'map', library: 'MaterialCommunityIcons' },
+      satellite: { icon: 'satellite', library: 'FontAwesome5' },
+      hybrid: { icon: 'map-legend', library: 'MaterialCommunityIcons' },
+    };
+    const def = mapTypeIcons[type] || mapTypeIcons.standard;
+    if (def.library === 'MaterialCommunityIcons') return <MaterialCommunityIcons name={def.icon} size={size} color={color} />;
+    return <FontAwesome5 name={def.icon} size={size} color={color} />;
+  };
+
+  const toggleMapType = () => {
+    setMapType(prev => {
+      if (prev === 'satellite') return 'standard';
+      if (prev === 'standard') return 'hybrid';
+      return 'satellite';
+    });
   };
 
   return (
@@ -232,7 +271,7 @@ export default function CowDetailsScreen() {
             <MapView
               ref={mapRef}
               style={styles.map}
-              mapType={MAP_TYPES[mapTypeIndex]}
+              mapType={mapType}
               initialRegion={{
                 latitude: Number(latitude),
                 longitude: Number(longitude),
@@ -249,7 +288,7 @@ export default function CowDetailsScreen() {
                 />
               )}
 
-              {/* Cow Marker */}
+              {/* Cow Marker with Custom Color */}
               <Marker
                 coordinate={{
                   latitude: Number(latitude),
@@ -257,17 +296,24 @@ export default function CowDetailsScreen() {
                 }}
                 title={name}
                 description={`Lat: ${latitude}, Lon: ${longitude}`}
-              />
+              >
+                {/* Custom icon using the loaded markerColor */}
+                <View style={[styles.markerIconWrapper, { backgroundColor: markerColor }]}>
+                  <MaterialCommunityIcons name="cow" size={20} color="#fff" />
+                </View>
+              </Marker>
             </MapView>
 
-            {/* small controls over the map (do not alter layout) */}
-            <View style={styles.mapControls}>
-              <TouchableOpacity style={styles.mapControlBtn} onPress={handleFocus}>
-                <Text style={styles.mapControlText}>🎯</Text>
+            {/* Floating controls over the map */}
+            <View style={styles.mapTypeButtonContainer}>
+              <TouchableOpacity
+                style={styles.mapTypeMainButton}
+                onPress={toggleMapType}
+              >
+                {renderIcon(mapType, '#fff', 20)}
               </TouchableOpacity>
-
-              <TouchableOpacity style={styles.mapControlBtn} onPress={nextMapType}>
-                <Text style={styles.mapControlText}>{MAP_TYPES[mapTypeIndex].toUpperCase()}</Text>
+              <TouchableOpacity style={styles.refreshButton} onPress={handleFocus}>
+                <MaterialCommunityIcons name="target" size={22} color="#4F8EF7" />
               </TouchableOpacity>
             </View>
           </View>
@@ -310,8 +356,7 @@ export default function CowDetailsScreen() {
           </View>
 
           <View style={styles.column}>
-            {/* Show GSM and LoRa indicators stacked to preserve the same area
-                They will visually match the old single-signal bars style but show both */}
+            {/* Show GSM and LoRa indicators stacked to preserve the same area */}
             <SignalIndicator rssi={gsmRssi ?? rssi ?? null} label="GSM" />
             <SignalIndicator rssi={loraRssi ?? rssi ?? null} label="LoRa" />
           </View>
@@ -357,7 +402,7 @@ export default function CowDetailsScreen() {
   );
 }
 
-// ---- STYLES (UNCHANGED + small additions for map controls) ----
+// ---- STYLES (UPDATED) ----
 
 const styles = StyleSheet.create({
   container: { padding: 16, backgroundColor: '#F2F7FA', paddingBottom: 80 },
@@ -383,6 +428,8 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     justifyContent: 'center',
     backgroundColor: '#fff',
+    borderColor: '#0bee88ff',
+    borderWidth: 1,
     padding: 12,
     borderRadius: 10,
     marginBottom: 10,
@@ -405,35 +452,49 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   map: { width: '100%', height: '100%' },
-  // small overlay controls on the map
-  mapControls: {
-    position: 'absolute',
-    top: 10,
-    right: 10,
-    flexDirection: 'column',
-    gap: 8,
-  },
-  mapControlBtn: {
-    backgroundColor: 'rgba(255,255,255,0.95)',
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    borderRadius: 8,
-    elevation: 4,
+  // Custom Marker Wrapper Style (copied from MapScreen logic)
+  markerIconWrapper: {
+    padding: 6,
+    borderRadius: 20,
+    borderWidth: 2,
+    borderColor: '#fff',
+    justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.3,
+    shadowRadius: 1,
+    elevation: 3,
   },
-  mapControlText: { fontSize: 12, fontWeight: '700', color: '#333' },
-
-  focusButton: {
+  // small overlay controls on the map
+  mapTypeButtonContainer: {
     position: 'absolute',
     bottom: 10,
     right: 10,
-    backgroundColor: 'white',
-    padding: 10,
-    borderRadius: 20,
-    elevation: 4,
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: 8,
   },
-  focusIcon: { fontSize: 18 },
+  mapTypeMainButton: {
+    backgroundColor: '#4F8EF7',
+    borderRadius: 24,
+    width: 48,
+    height: 48,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 5,
+  },
+  refreshButton: {
+    backgroundColor: '#fff',
+    borderRadius: 24,
+    width: 48,
+    height: 48,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 5,
+    borderWidth: 2,
+    borderColor: '#4F8EF7',
+  },
   backButton: {
     position: 'absolute',
     bottom: 10,
@@ -469,7 +530,7 @@ const styles = StyleSheet.create({
     marginBottom: 14,
     elevation: 3,
   },
-  infoRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10,borderColor: '#0bee88ff'},
+  infoRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10, borderColor: '#0bee88ff', borderWidth: 1, padding: 5, borderRadius: 10, backgroundColor: '#ffffffff' },
   infoText: {
     flex: 1,
     fontSize: 16,

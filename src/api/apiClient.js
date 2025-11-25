@@ -3,7 +3,10 @@ import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Base URL - matches the API you provided (port 8000)
-const BASE_URL = 'http://213.199.51.193:8000';
+import { BASE_URL } from '../constants/Config';
+
+// Base URL - matches the API you provided (port 8000)
+// const BASE_URL = 'http://213.199.51.193:8000'; // Moved to Config.js
 
 const api = axios.create({
   baseURL: BASE_URL,

@@ -1,3 +1,4 @@
+// src/screens/MapScreen.js
 import React, { useEffect, useState, useRef, useContext, useCallback } from 'react';
 import {
   View,
@@ -6,256 +7,215 @@ import {
   Text,
   ActivityIndicator,
   useColorScheme,
+  Alert,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import MapView, { Marker } from 'react-native-maps';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import axios from 'axios';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons, FontAwesome5 } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { UserContext } from '../context/UserContext';
+import api from '../api/apiClient';
 
-const COLOR_KEY = 'cattleColors';
-const LAST_MAP_REGION_KEY = 'lastMapRegion';
-const POLLING_INTERVAL = 30000; // 30 seconds instead of 100ms
-const API_BASE_URL = 'http://100.79.26.84:8000';
-
-// Coordinate validation function
-const isValidCoordinate = (lat, lon) => {
-  return lat && lon && 
-         !isNaN(lat) && !isNaN(lon) &&
-         lat >= -90 && lat <= 90 &&
-         lon >= -180 && lon <= 180;
-};
-
-// Default colors for markers
+const POLLING_INTERVAL = 30000; // 30s
 const DEFAULT_COLORS = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', '#98D8C8', '#F7DC6F'];
 
+const isValidCoordinate = (lat, lon) => {
+  if (lat == null || lon == null) return false;
+  const nlat = Number(lat);
+  const nlon = Number(lon);
+  return !Number.isNaN(nlat) && nlat >= -90 && nlat <= 90 && nlon >= -180 && nlon <= 180;
+};
+
 export default function MapScreen() {
-  const { user } = useContext(UserContext);
-  const userId = user?.id;
+  const { cattleList = [], fetchCattle } = useContext(UserContext);
+  const navigation = useNavigation(); 
+  const colorScheme = useColorScheme();
+
+  const [items, setItems] = useState([]); // Holds API location/collar data
   const [loading, setLoading] = useState(true);
-  const [cattleData, setCattleData] = useState([]);
-  const [markerColors, setMarkerColors] = useState({});
-  const [mapType, setMapType] = useState('satellite');
-  const [showMapTypeOptions, setShowMapTypeOptions] = useState(false);
-  const [region, setRegion] = useState(null);
-  const [hasAutoFocused, setHasAutoFocused] = useState(false);
+  const [mapType, setMapType] = useState('satellite'); 
 
   const mapRef = useRef(null);
-  const navigation = useNavigation();
-  const colorScheme = useColorScheme();
-  const regionChangeTimeoutRef = useRef(null);
+  const markerColorsRef = useRef({});
 
-  const animateToCattle = useCallback((data) => {
-    const coords = data
-      .map(item => {
-        if (!item.latest_record) return null;
-        const lat = parseFloat(item.latest_record.latitude);
-        const lon = parseFloat(item.latest_record.longitude);
-        return isValidCoordinate(lat, lon) ? { latitude: lat, longitude: lon } : null;
-      })
-      .filter(Boolean);
-    if (coords.length > 0 && mapRef.current) {
-      mapRef.current.fitToCoordinates(coords, {
-        edgePadding: { top: 60, bottom: 60, left: 40, right: 40 },
-        animated: true,
-      });
-    }
-  }, []);
-
-  const assignDefaultColors = useCallback((cattleList, existingColors) => {
-    const newColors = { ...existingColors };
-    let colorIndex = 0;
-    
-    cattleList.forEach(cow => {
-      if (!newColors[cow.id]) {
-        newColors[cow.id] = DEFAULT_COLORS[colorIndex % DEFAULT_COLORS.length];
-        colorIndex++;
-      }
-    });
-    
-    return newColors;
-  }, []);
-
-  const fetchMergedCattleData = useCallback(async (showLoader = false) => {
-    try {
-      if (showLoader) {
-        setLoading(true);
-      }
-      
-      const [genericRes, latestRes] = await Promise.all([
-        axios.get(`${API_BASE_URL}/api/cattle/user/${userId}`).catch(err => {
-          console.error('Error fetching cattle data:', err);
-          return { data: { data: [] } };
-        }),
-        axios.get(`${API_BASE_URL}/api/cattle/lastdata/latest/${userId}`).catch(err => {
-          console.error('Error fetching latest data:', err);
-          return { data: [] };
-        })
-      ]);
-
-      // Add response validation
-      if (!genericRes || !latestRes) {
-        throw new Error('Network error - no response received');
-      }
-
-      const general = genericRes.data?.data || [];
-      const latest = latestRes.data || [];
-
-      console.log('General cattle data:', general.length);
-      console.log('Latest location data:', latest.length);
-
-      // Assign default colors to any cattle that don't have colors
-      const updatedColors = assignDefaultColors(general, markerColors);
-      if (Object.keys(updatedColors).length !== Object.keys(markerColors).length) {
-        setMarkerColors(updatedColors);
-        // Save the updated colors to AsyncStorage
-        try {
-          await AsyncStorage.setItem(COLOR_KEY, JSON.stringify(updatedColors));
-        } catch (e) {
-          console.error('Error saving marker colors:', e);
-        }
-      }
-
-      // Optimize data processing - create a Map for O(1) lookups
-      const latestMap = new Map();
-      latest.forEach(item => {
-        if (item.collar_id) {
-          latestMap.set(item.collar_id, item);
-        }
-      });
-
-      console.log('Latest data map:', Array.from(latestMap.keys()));
-
-      const merged = general
-        .map(cow => {
-          const match = latestMap.get(cow.id);
-          console.log(`Processing cow ${cow.id} (${cow.cattle_name}):`, match ? 'has location data' : 'no location data');
-          
-          // Return cattle data even if no latest location or color
-          // We'll handle the missing location in the marker rendering
-          return {
-            ...cow,
-            latest_record: match?.latest_record || null,
-            collar_id: cow.id,
-            markerColor: updatedColors[cow.id] || DEFAULT_COLORS[0],
-          };
-        })
-        .filter(Boolean);
-
-      console.log('Final merged data:', merged.length, 'cattle');
-      merged.forEach(cow => {
-        console.log(`- ${cow.cattle_name} (${cow.id}):`, cow.latest_record ? 'has location' : 'no location');
-      });
-
-      setCattleData(merged);
-
-      // Auto-focus only on first app load and only if region is not already restored
-      if (!hasAutoFocused && !region && merged.length > 0) {
-        // Only focus on cattle that have valid coordinates
-        const cattleWithLocations = merged.filter(cow => 
-          cow.latest_record && 
-          isValidCoordinate(
-            parseFloat(cow.latest_record.latitude), 
-            parseFloat(cow.latest_record.longitude)
-          )
-        );
-        if (cattleWithLocations.length > 0) {
-          animateToCattle(cattleWithLocations);
-          setHasAutoFocused(true);
-        }
-      }
-    } catch (err) {
-      console.error('Data fetch error:', err.message);
-    } finally {
-      // Always set loading to false after the first successful data fetch
-      setLoading(false);
-    }
-  }, [userId, markerColors, hasAutoFocused, region, animateToCattle, assignDefaultColors]);
+  // 🐂 Efficient cattle name/collar lookup map
+  const cattleMapRef = useRef({});
 
   useEffect(() => {
-    loadMarkerColors();
-    loadLastRegion();
+    const newMap = {};
+    (cattleList || []).forEach(cattle => {
+      // Use collarId as the key for fetching API data, but allow fallback to id
+      const collarIdKey = String(cattle.collarId || cattle.id); 
+      // Use id or cattleId as the key for AsyncStorage (the static ID)
+      const storageKey = String(cattle.id || cattle.cattleId || cattle.collarId); 
+
+      if (collarIdKey && collarIdKey !== 'undefined') {
+        newMap[collarIdKey] = {
+          ...cattle, // Store full static data for easy lookup later
+          name: cattle.cattle_name || cattle.name || `Cattle ${collarIdKey}`,
+          collarId: collarIdKey,
+          storageKey: storageKey,
+        };
+      }
+    });
+    cattleMapRef.current = newMap;
+  }, [cattleList]);
+
+  const assignColors = (ids, customColorMap = {}) => {
+    const out = { ...markerColorsRef.current };
+    let idx = 0;
+    
+    const idsToAssignDefault = ids.filter(id => {
+        const storageKey = cattleMapRef.current[id]?.storageKey;
+        return !out[id] && !(storageKey && customColorMap[storageKey]);
+    });
+
+    idsToAssignDefault.forEach((id) => {
+      out[id] = DEFAULT_COLORS[idx % DEFAULT_COLORS.length];
+      idx++;
+    });
+
+    ids.forEach((id) => {
+        const storageKey = cattleMapRef.current[id]?.storageKey;
+        if (storageKey && customColorMap[storageKey]) {
+            out[id] = customColorMap[storageKey]; 
+        }
+    });
+    
+    markerColorsRef.current = out;
+    return out;
+  };
+
+  const fetchAll = useCallback(async (showLoader = false) => {
+    if (showLoader) setLoading(true);
+    try {
+      const deviceIds = Object.keys(cattleMapRef.current);
+
+      if (deviceIds.length === 0) {
+        setItems([]);
+        return;
+      }
+
+      let customColorMap = {};
+      try {
+        const stored = await AsyncStorage.getItem('cattleColors');
+        customColorMap = stored ? JSON.parse(stored) : {};
+      } catch (e) {
+        console.error('Failed to load custom colors:', e);
+      }
+
+      assignColors(deviceIds, customColorMap);
+
+      const promises = deviceIds.map(id =>
+        api.get(`/api/collar-data/${id}`)
+          .then(res => ({ ok: true, id: String(id), data: res.data }))
+          .catch(err => ({ ok: false, id: String(id), error: err }))
+      );
+
+      const settled = await Promise.allSettled(promises);
+
+      const merged = settled.map(s => {
+        let collarId = s.value?.id || s.reason?.id || 'unknown';
+        let data = s.status === 'fulfilled' && s.value.ok ? s.value.data : null;
+
+        const cattleDetails = cattleMapRef.current[collarId] || {};
+        const lastLocation = data?.lastLocation ?? null;
+        const apiLastSeen = data?.lastSeen ?? data?.lastLocation?.timestamp ?? data?.updatedAt ?? null;
+
+
+        const latest_record = lastLocation && isValidCoordinate(lastLocation.lat, lastLocation.lon)
+          ? {
+            latitude: lastLocation.lat,
+            longitude: lastLocation.lon,
+            created_at: lastLocation.timestamp ?? apiLastSeen, // Use the most recent timestamp
+            battery_voltage: typeof data.__v === 'number' ? data.__v : null,
+            body_temperature: null, 
+            gsm_rssi: typeof data.gsm_rssi === 'number' ? data.gsm_rssi : null,
+            lora_rssi: typeof data.lora_rssi === 'number' ? data.lora_rssi : null,
+          } : null;
+
+        return {
+          id: cattleDetails.id ?? collarId,
+          collar_id: collarId,
+          cattle_name: cattleDetails.name ?? `Cattle ${collarId}`,
+          latest_record,
+          markerColor: markerColorsRef.current[collarId] ?? '#FF6B6B',
+        };
+      });
+
+      setItems(merged);
+    } catch (err) {
+      console.error('Map fetchAll error:', err);
+      Alert.alert('Network error', 'Could not fetch collar locations.');
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useFocusEffect(
     useCallback(() => {
-      if (userId) {
-        // Show loader only on initial load
-        fetchMergedCattleData(true);
-        const interval = setInterval(() => fetchMergedCattleData(false), POLLING_INTERVAL);
-        
-        return () => {
-          clearInterval(interval);
-        };
+      if (cattleList.length === 0 && fetchCattle) {
+          fetchCattle();
       }
-    }, [userId, fetchMergedCattleData])
+      fetchAll(true);
+      const interval = setInterval(() => fetchAll(false), POLLING_INTERVAL);
+      return () => clearInterval(interval);
+    }, [fetchAll, cattleList, fetchCattle])
   );
 
-  const loadMarkerColors = async () => {
-    try {
-      const savedColors = await AsyncStorage.getItem(COLOR_KEY);
-      if (savedColors) {
-        setMarkerColors(JSON.parse(savedColors));
-      }
-    } catch (e) {
-      console.error('Error loading marker colors:', e);
-    }
-  };
+  const focusOnCattle = () => {
+    const coords = items.map(i => i.latest_record ? {
+      latitude: Number(i.latest_record.latitude),
+      longitude: Number(i.latest_record.longitude)
+    } : null).filter(Boolean);
 
-  const loadLastRegion = async () => {
-    try {
-      const savedRegion = await AsyncStorage.getItem(LAST_MAP_REGION_KEY);
-      if (savedRegion) {
-        setRegion(JSON.parse(savedRegion));
-      }
-    } catch (e) {
-      console.error('Error loading last region:', e);
+    if (coords.length > 0 && mapRef.current?.fitToCoordinates) {
+      mapRef.current.fitToCoordinates(coords, { edgePadding: { top: 60, bottom: 60, left: 40, right: 40 }, animated: true });
     }
-  };
-
-  const saveCurrentRegion = async (newRegion) => {
-    try {
-      await AsyncStorage.setItem(LAST_MAP_REGION_KEY, JSON.stringify(newRegion));
-    } catch (e) {
-      console.error('Error saving region:', e);
-    }
-  };
-
-  const onRegionChangeComplete = (newRegion) => {
-    setRegion(newRegion);
-    
-    // Debounce the save operation
-    if (regionChangeTimeoutRef.current) {
-      clearTimeout(regionChangeTimeoutRef.current);
-    }
-    
-    regionChangeTimeoutRef.current = setTimeout(() => {
-      saveCurrentRegion(newRegion);
-    }, 1000);
-  };
-
-  const mapTypeIcons = {
-    standard: { icon: 'map', library: 'MaterialCommunityIcons' },
-    satellite: { icon: 'satellite', library: 'FontAwesome5' },
-    hybrid: { icon: 'map-legend', library: 'MaterialCommunityIcons' },
   };
 
   const renderIcon = (type, color, size) => {
-    const { icon, library } = mapTypeIcons[type] || {};
-    if (library === 'MaterialCommunityIcons') {
-      return <MaterialCommunityIcons name={icon} size={size} color={color} />;
-    } else if (library === 'FontAwesome5') {
-      return <FontAwesome5 name={icon} size={size} color={color} />;
-    }
-    return null;
+    const mapTypeIcons = {
+      standard: { icon: 'map', library: 'MaterialCommunityIcons' },
+      satellite: { icon: 'satellite', library: 'FontAwesome5' },
+      hybrid: { icon: 'map-legend', library: 'MaterialCommunityIcons' },
+    };
+    const def = mapTypeIcons[type] || mapTypeIcons.standard;
+    if (def.library === 'MaterialCommunityIcons') return <MaterialCommunityIcons name={def.icon} size={size} color={color} />;
+    return <FontAwesome5 name={def.icon} size={size} color={color} />;
   };
 
-  const otherMapTypes = Object.keys(mapTypeIcons).filter(t => t !== mapType);
+  const toggleMapType = () => {
+    setMapType(prev => {
+      if (prev === 'satellite') return 'standard';
+      if (prev === 'standard') return 'hybrid';
+      return 'satellite';
+    });
+  };
+
+  // ⭐️ NEW: Handler to navigate to CowDetailsScreen
+  const handleMarkerPress = (mapItem) => {
+    // 1. Use the collar_id (or its fallback) to find the full static cattle data
+    const fullCowData = cattleMapRef.current[mapItem.collar_id];
+    
+    if (fullCowData) {
+      // 2. Overwrite the static 'latest_record' with the fresh location data from the API
+      // This ensures CowDetailsScreen uses the latest location fetched here
+      const cowForNavigation = {
+          ...fullCowData,
+          latest_record: mapItem.latest_record || fullCowData.latest_record,
+          collarId: mapItem.collar_id, // Ensure collarId is present
+      };
+      
+      navigation.navigate('CowDetails', { cow: cowForNavigation });
+    } else {
+      Alert.alert('Error', 'Could not find complete cattle details for navigation.');
+    }
+  };
+
 
   return (
-    <SafeAreaView style={[styles.safeArea, colorScheme === 'dark' && styles.darkBackground]}>
+    <View style={[styles.fullScreen, colorScheme === 'dark' && styles.darkBackground]}>
       <View style={{ flex: 1 }}>
         <MapView
           ref={mapRef}
@@ -263,28 +223,47 @@ export default function MapScreen() {
           mapType={mapType}
           showsUserLocation
           showsMyLocationButton
-          initialRegion={region}
-          onRegionChangeComplete={onRegionChangeComplete}
-          customMapStyle={colorScheme === 'dark' ? darkMapStyle : []}
+          initialRegion={
+            items.length > 0 && items[0].latest_record
+              ? {
+                latitude: Number(items[0].latest_record.latitude),
+                longitude: Number(items[0].latest_record.longitude),
+                latitudeDelta: 0.02,
+                longitudeDelta: 0.02,
+              }
+              : undefined
+          }
         >
-          {cattleData.map((item, index) => {
-            // Only render markers for cattle that have valid location data
+          {items.map((item, idx) => {
             if (!item.latest_record) return null;
-            
-            const lat = parseFloat(item.latest_record.latitude);
-            const lon = parseFloat(item.latest_record.longitude);
+            const lat = Number(item.latest_record.latitude);
+            const lon = Number(item.latest_record.longitude);
             if (!isValidCoordinate(lat, lon)) return null;
+
+            // Find the full static data to determine if an alert exists
+            const cattleStaticData = cattleMapRef.current[item.collar_id];
+            const isAlert = cattleStaticData?.healthNotes?.toLowerCase()?.includes('alert');
+
 
             return (
               <Marker
-                key={item.id || index}
+                key={item.collar_id ?? item.id ?? idx}
+                identifier={item.collar_id ?? item.id ?? String(idx)}
                 coordinate={{ latitude: lat, longitude: lon }}
-                pinColor={item.markerColor || 'red'}
-                title={`🐮 ${item.cattle_name || 'Unnamed'} (ID: ${item.id})`}
-                description={`Temp: ${item.latest_record.body_temperature || 'N/A'}°C\nBattery: ${item.latest_record.battery_voltage || 'N/A'}V`}
-                onCalloutPress={() => navigation.navigate('CowDetails', { cow: item })}
+                title={item.cattle_name} 
+                // ⭐️ CHANGE: Added description to prompt tap for details
+                description={"Tap here for full details"} 
+                // ⭐️ THE FIX: Call the new handler on callout press
+                onCalloutPress={() => handleMarkerPress(item)}
               >
-                <View style={[styles.markerIconWrapper, { backgroundColor: item.markerColor }]}>
+                <View style={[
+                    styles.markerIconWrapper, 
+                    { 
+                        backgroundColor: item.markerColor,
+                        // Highlight marker border if static data indicates alert
+                        borderColor: isAlert ? '#FF3B30' : '#fff'
+                    }
+                ]}>
                   <MaterialCommunityIcons name="cow" size={20} color="#fff" />
                 </View>
               </Marker>
@@ -292,42 +271,20 @@ export default function MapScreen() {
           })}
         </MapView>
 
-        <View style={styles.mapTypeButtonContainer} pointerEvents="box-none">
-          {showMapTypeOptions &&
-            otherMapTypes.map((type) => (
-              <TouchableOpacity
-                key={type}
-                style={styles.mapTypePopupButton}
-                onPress={() => {
-                  setMapType(type);
-                  setShowMapTypeOptions(false);
-                }}
-                accessibilityLabel={`Switch to ${type} map`}
-                accessibilityRole="button"
-              >
-                {renderIcon(type, '#4F8EF7', 20)}
-              </TouchableOpacity>
-            ))}
-          <TouchableOpacity
-            style={styles.mapTypeMainButton}
-            onPress={() => setShowMapTypeOptions(prev => !prev)}
-            accessibilityLabel="Change map type"
-            accessibilityRole="button"
+        {/* Adjust button container position to account for full screen */}
+        <View style={styles.mapTypeButtonContainer}>
+          <TouchableOpacity 
+            style={styles.mapTypeMainButton} 
+            onPress={toggleMapType} 
           >
             {renderIcon(mapType, '#fff', 26)}
           </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.refreshButton}
-            onPress={() => animateToCattle(cattleData)}
-            accessibilityLabel="Focus on cattle locations"
-            accessibilityRole="button"
-          >
+          <TouchableOpacity style={styles.refreshButton} onPress={focusOnCattle}>
             <MaterialCommunityIcons name="target" size={28} color="#4F8EF7" />
           </TouchableOpacity>
         </View>
 
-        {!loading && cattleData.length === 0 && (
+        {!loading && items.length === 0 && (
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyText}>You don't have any cattle registered yet.</Text>
             <Text style={styles.emptySubText}>Please add your cattle by clicking the add collar.</Text>
@@ -340,21 +297,19 @@ export default function MapScreen() {
           </View>
         )}
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#F2F7FA',
+  fullScreen: { 
+    flex: 1, 
+    backgroundColor: '#F2F7FA' 
   },
-  darkBackground: {
-    backgroundColor: '#121212',
-  },
+  darkBackground: { backgroundColor: '#121212' },
   mapTypeButtonContainer: {
     position: 'absolute',
-    bottom: 40,
+    bottom: 80, 
     right: 20,
     zIndex: 20,
     alignItems: 'center',
@@ -368,18 +323,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     elevation: 5,
     marginBottom: 8,
-  },
-  mapTypePopupButton: {
-    backgroundColor: '#fff',
-    borderRadius: 22,
-    width: 44,
-    height: 44,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: '#4F8EF7',
-    elevation: 3,
   },
   refreshButton: {
     backgroundColor: '#fff',
@@ -401,76 +344,15 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     elevation: 5,
   },
-  emptyText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-    textAlign: 'center',
-    marginBottom: 6,
-  },
-  emptySubText: {
-    fontSize: 13,
-    color: '#666',
-    textAlign: 'center',
-  },
-  loaderOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(255,255,255,0.6)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  markerIconWrapper: {
-    padding: 6,
-    borderRadius: 20,
-    borderWidth: 2,
-    borderColor: '#fff',
-    justifyContent: 'center',
-    alignItems: 'center',
+  emptyText: { fontSize: 16, fontWeight: '600', color: '#333', textAlign: 'center', marginBottom: 6 },
+  emptySubText: { fontSize: 13, color: '#666', textAlign: 'center' },
+  loaderOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(255,255,255,0.6)', justifyContent: 'center', alignItems: 'center' },
+  markerIconWrapper: { 
+    padding: 6, 
+    borderRadius: 20, 
+    borderWidth: 2, 
+    borderColor: '#fff', 
+    justifyContent: 'center', 
+    alignItems: 'center' 
   },
 });
-
-const darkMapStyle = [
-  { elementType: 'geometry', stylers: [{ color: '#242f3e' }] },
-  { elementType: 'labels.text.stroke', stylers: [{ color: '#242f3e' }] },
-  { elementType: 'labels.text.fill', stylers: [{ color: '#746855' }] },
-  {
-    featureType: 'administrative.locality',
-    elementType: 'labels.text.fill',
-    stylers: [{ color: '#d59563' }],
-  },
-  {
-    featureType: 'poi',
-    elementType: 'labels.text.fill',
-    stylers: [{ color: '#d59563' }],
-  },
-  {
-    featureType: 'road',
-    elementType: 'geometry',
-    stylers: [{ color: '#38414e' }],
-  },
-  {
-    featureType: 'road',
-    elementType: 'geometry.stroke',
-    stylers: [{ color: '#212a37' }],
-  },
-  {
-    featureType: 'road',
-    elementType: 'labels.text.fill',
-    stylers: [{ color: '#9ca5b3' }],
-  },
-  {
-    featureType: 'water',
-    elementType: 'geometry',
-    stylers: [{ color: '#17263c' }],
-  },
-  {
-    featureType: 'water',
-    elementType: 'labels.text.fill',
-    stylers: [{ color: '#515c6d' }],
-  },
-  {
-    featureType: 'water',
-    elementType: 'labels.text.stroke',
-    stylers: [{ color: '#17263c' }],
-  },
-];
