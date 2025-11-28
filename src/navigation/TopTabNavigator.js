@@ -11,12 +11,15 @@ import {
   Vibration,
   ScrollView,
 } from "react-native";
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons'; 
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import MapScreen from "../screens/MapScreen";
 import CattleListScreen from "../screens/CattleListScreen";
 
+import SummaryScreen from "../screens/SummaryScreen";
+import CommunityScreen from "../screens/CommunityScreen";
+
 const BUTTON_HEIGHT = 44;
-const TABS = ["map", "cattles", "summary", "community"]; 
+const TABS = ["map", "cattles", "summary", "community"];
 
 function TopTabNavigator() {
   const [activeTab, setActiveTab] = useState("map");
@@ -28,47 +31,11 @@ function TopTabNavigator() {
     if (activeTab === "map") {
       return <MapScreen />;
     } else if (activeTab === "summary") {
-      return (
-        <View style={[
-          styles.card,
-          colorScheme === 'dark' && styles.darkCard
-        ]}>
-          <Text style={[
-            styles.cardTitle,
-            colorScheme === 'dark' && styles.darkText
-          ]}>📊 Cattle Summary</Text>
-          <Text style={[
-            styles.cardText,
-            colorScheme === 'dark' && styles.darkSubText
-          ]}>Total Cattle: 5</Text>
-          <Text style={[
-            styles.cardText,
-            colorScheme === 'dark' && styles.darkSubText
-          ]}>Healthy: 4 | Needs Attention: 1</Text>
-        </View>
-      );
+      return <SummaryScreen />;
     } else if (activeTab === "cattles") {
       return <CattleListScreen />;
     } else if (activeTab === "community") {
-      return (
-        <View style={[
-          styles.card,
-          colorScheme === 'dark' && styles.darkCard
-        ]}>
-          <Text style={[
-            styles.cardTitle,
-            colorScheme === 'dark' && styles.darkText
-          ]}>👥 Community Hub</Text>
-          <Text style={[
-            styles.cardText,
-            colorScheme === 'dark' && styles.darkSubText
-          ]}>Connect with other farmers!</Text>
-          <Text style={[
-            styles.cardText,
-            colorScheme === 'dark' && styles.darkSubText
-          ]}>Share tips, news, and best practices.</Text>
-        </View>
-      );
+      return <CommunityScreen />;
     }
     return null;
   };
@@ -101,12 +68,12 @@ function TopTabNavigator() {
     const IconComponent = iconDetails.Component;
     const iconName = iconDetails.name;
     const isActive = activeTab === tabKey;
-    
+
     // Determine icon color based on active state and color scheme
-    const iconColor = isActive 
-      ? '#FFF' 
+    const iconColor = isActive
+      ? '#FFF'
       : (colorScheme === 'dark' ? '#8B4513' : '#27AE60');
-    
+
     // Determine text style dynamically
     const textStyle = [
       styles.buttonText,
@@ -128,11 +95,11 @@ function TopTabNavigator() {
         ]}
         onPress={() => handleTabPress(tabKey)}
       >
-        <IconComponent 
-          name={iconName} 
-          size={18} 
-          color={iconColor} 
-          style={{ marginRight: 6 }} 
+        <IconComponent
+          name={iconName}
+          size={18}
+          color={iconColor}
+          style={{ marginRight: 6 }}
         />
         <Text style={textStyle}>
           {tabKey.charAt(0).toUpperCase() + tabKey.slice(1)}
@@ -174,17 +141,17 @@ function TopTabNavigator() {
 
 const styles = StyleSheet.create({
   // ⭐️ Renamed and clarified root container style
-  container: { 
+  container: {
     flex: 1,
     backgroundColor: "#FFFDF6",
     // Manually handle Android status bar padding for a full-screen app container
-    paddingTop: Platform.OS === "android" ? StatusBar.currentHeight : 0, 
+    paddingTop: Platform.OS === "android" ? StatusBar.currentHeight : 0,
   },
   darkContainer: {
     backgroundColor: '#121212',
   },
   // Removed old 'safeArea' and 'darkSafeArea' styles
-  
+
   tabBarWrapper: {
     maxHeight: BUTTON_HEIGHT + 16,
     backgroundColor: "#FFFDF6",
@@ -204,7 +171,7 @@ const styles = StyleSheet.create({
   button: {
     flexDirection: 'row',
     height: BUTTON_HEIGHT,
-    minWidth: Platform.select({ ios: 100, android: 90 }), 
+    minWidth: Platform.select({ ios: 100, android: 90 }),
     paddingHorizontal: Platform.select({ ios: 18, android: 12 }),
     borderRadius: BUTTON_HEIGHT / 2,
     marginHorizontal: 4,

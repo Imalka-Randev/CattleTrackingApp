@@ -1,6 +1,6 @@
 import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import Ionicons from '@expo/vector-icons/Ionicons'; 
+import Ionicons from '@expo/vector-icons/Ionicons';
 
 import HomeScreen from '../screens/HomeScreen';
 import AddCollarScreen from '../screens/AddCollarScreen';
@@ -26,14 +26,14 @@ export default function BottomTabNavigator() {
 
           return <Ionicons name={iconName} size={size} color={color} />;
         },
-        tabBarActiveTintColor: '#27AE60', // Changed to your app's primary green
-        tabBarInactiveTintColor: '#333333', // Charcoal Gray for inactive elements
+        tabBarActiveTintColor: '#27AE60',
+        tabBarInactiveTintColor: '#333333',
         tabBarStyle: {
           paddingVertical: 6,
           height: 80,
-          backgroundColor: '#FFFDF6', // Cream White for tab bar background
-          borderTopColor: '#E0D7C6', // Light Beige for subtle border
-          shadowColor: '#7C4F29', // Earth Brown for shadow
+          backgroundColor: '#FFFDF6',
+          borderTopColor: '#E0D7C6',
+          shadowColor: '#7C4F29',
           shadowOffset: { width: 0, height: -2 },
           shadowOpacity: 0.1,
           shadowRadius: 4,
@@ -41,7 +41,7 @@ export default function BottomTabNavigator() {
         },
         tabBarLabelStyle: {
           fontSize: 12,
-          color: '#333333', // Charcoal Gray for label text
+          color: '#333333',
         },
       })}
     >

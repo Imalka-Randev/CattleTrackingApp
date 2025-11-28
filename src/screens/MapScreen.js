@@ -1,5 +1,5 @@
 // src/screens/MapScreen.js
-import React, { useEffect, useState, useRef, useContext, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useContext, useCallback, useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -23,31 +23,28 @@ const isValidCoordinate = (lat, lon) => {
   if (lat == null || lon == null) return false;
   const nlat = Number(lat);
   const nlon = Number(lon);
+  // Filter out 0,0 as it's likely invalid/default
+  if (Math.abs(nlat) < 0.0001 && Math.abs(nlon) < 0.0001) return false;
   return !Number.isNaN(nlat) && nlat >= -90 && nlat <= 90 && nlon >= -180 && nlon <= 180;
 };
 
 export default function MapScreen() {
-  const { cattleList = [], fetchCattle } = useContext(UserContext);
-  const navigation = useNavigation(); 
+  // ⭐️ Refactored to use shared fetchCollarData from context
+  const { cattleList = [], fetchCattle, collarData, updateMultipleCollarData, mapHasFocused, setMapHasFocused, mapRegion, setMapRegion, fetchCollarData } = useContext(UserContext);
+  const navigation = useNavigation();
   const colorScheme = useColorScheme();
-
-  const [items, setItems] = useState([]); // Holds API location/collar data
-  const [loading, setLoading] = useState(true);
-  const [mapType, setMapType] = useState('satellite'); 
 
   const mapRef = useRef(null);
   const markerColorsRef = useRef({});
 
   // 🐂 Efficient cattle name/collar lookup map
-  const cattleMapRef = useRef({});
-
-  useEffect(() => {
+  const cattleMap = useMemo(() => {
     const newMap = {};
     (cattleList || []).forEach(cattle => {
       // Use collarId as the key for fetching API data, but allow fallback to id
-      const collarIdKey = String(cattle.collarId || cattle.id); 
+      const collarIdKey = String(cattle.collarId || cattle.id).trim();
       // Use id or cattleId as the key for AsyncStorage (the static ID)
-      const storageKey = String(cattle.id || cattle.cattleId || cattle.collarId); 
+      const storageKey = String(cattle.id || cattle.cattleId || cattle.collarId);
 
       if (collarIdKey && collarIdKey !== 'undefined') {
         newMap[collarIdKey] = {
@@ -58,16 +55,50 @@ export default function MapScreen() {
         };
       }
     });
-    cattleMapRef.current = newMap;
+    return newMap;
   }, [cattleList]);
+
+  // Derive items from context collarData
+  const items = useMemo(() => {
+    const deviceIds = Object.keys(cattleMap);
+    return deviceIds.map(collarId => {
+      const cattleDetails = cattleMap[collarId] || {};
+      const data = collarData[collarId]; // Raw API data from context
+
+      const lastLocation = data?.lastLocation ?? null;
+      const apiLastSeen = data?.lastSeen ?? data?.lastLocation?.timestamp ?? data?.updatedAt ?? null;
+
+      const latest_record = lastLocation && isValidCoordinate(lastLocation.lat, lastLocation.lon)
+        ? {
+          latitude: lastLocation.lat,
+          longitude: lastLocation.lon,
+          created_at: lastLocation.timestamp ?? apiLastSeen,
+          battery_voltage: typeof data?.__v === 'number' ? data.__v : null,
+          body_temperature: null,
+          gsm_rssi: typeof data?.gsm_rssi === 'number' ? data.gsm_rssi : null,
+          lora_rssi: typeof data?.lora_rssi === 'number' ? data.lora_rssi : null,
+        } : null;
+
+      return {
+        id: cattleDetails.id ?? collarId,
+        collar_id: collarId,
+        cattle_name: cattleDetails.name ?? `Cattle ${collarId}`,
+        latest_record,
+        markerColor: markerColorsRef.current[collarId] ?? '#FF6B6B',
+      };
+    });
+  }, [collarData, cattleMap]);
+
+  const [loading, setLoading] = useState(true);
+  const [mapType, setMapType] = useState('satellite');
 
   const assignColors = (ids, customColorMap = {}) => {
     const out = { ...markerColorsRef.current };
     let idx = 0;
-    
+
     const idsToAssignDefault = ids.filter(id => {
-        const storageKey = cattleMapRef.current[id]?.storageKey;
-        return !out[id] && !(storageKey && customColorMap[storageKey]);
+      const storageKey = cattleMap[id]?.storageKey;
+      return !out[id] && !(storageKey && customColorMap[storageKey]);
     });
 
     idsToAssignDefault.forEach((id) => {
@@ -76,92 +107,70 @@ export default function MapScreen() {
     });
 
     ids.forEach((id) => {
-        const storageKey = cattleMapRef.current[id]?.storageKey;
-        if (storageKey && customColorMap[storageKey]) {
-            out[id] = customColorMap[storageKey]; 
-        }
+      const storageKey = cattleMap[id]?.storageKey;
+      if (storageKey && customColorMap[storageKey]) {
+        out[id] = customColorMap[storageKey];
+      }
     });
-    
+
     markerColorsRef.current = out;
     return out;
   };
 
-  const fetchAll = useCallback(async (showLoader = false) => {
-    if (showLoader) setLoading(true);
+  const loadColors = useCallback(async () => {
     try {
-      const deviceIds = Object.keys(cattleMapRef.current);
+      const deviceIds = Object.keys(cattleMap);
+      if (deviceIds.length === 0) return;
 
-      if (deviceIds.length === 0) {
-        setItems([]);
-        return;
-      }
-
-      let customColorMap = {};
-      try {
-        const stored = await AsyncStorage.getItem('cattleColors');
-        customColorMap = stored ? JSON.parse(stored) : {};
-      } catch (e) {
-        console.error('Failed to load custom colors:', e);
-      }
+      const stored = await AsyncStorage.getItem('cattleColors');
+      const customColorMap = stored ? JSON.parse(stored) : {};
 
       assignColors(deviceIds, customColorMap);
-
-      const promises = deviceIds.map(id =>
-        api.get(`/api/collar-data/${id}`)
-          .then(res => ({ ok: true, id: String(id), data: res.data }))
-          .catch(err => ({ ok: false, id: String(id), error: err }))
-      );
-
-      const settled = await Promise.allSettled(promises);
-
-      const merged = settled.map(s => {
-        let collarId = s.value?.id || s.reason?.id || 'unknown';
-        let data = s.status === 'fulfilled' && s.value.ok ? s.value.data : null;
-
-        const cattleDetails = cattleMapRef.current[collarId] || {};
-        const lastLocation = data?.lastLocation ?? null;
-        const apiLastSeen = data?.lastSeen ?? data?.lastLocation?.timestamp ?? data?.updatedAt ?? null;
-
-
-        const latest_record = lastLocation && isValidCoordinate(lastLocation.lat, lastLocation.lon)
-          ? {
-            latitude: lastLocation.lat,
-            longitude: lastLocation.lon,
-            created_at: lastLocation.timestamp ?? apiLastSeen, // Use the most recent timestamp
-            battery_voltage: typeof data.__v === 'number' ? data.__v : null,
-            body_temperature: null, 
-            gsm_rssi: typeof data.gsm_rssi === 'number' ? data.gsm_rssi : null,
-            lora_rssi: typeof data.lora_rssi === 'number' ? data.lora_rssi : null,
-          } : null;
-
-        return {
-          id: cattleDetails.id ?? collarId,
-          collar_id: collarId,
-          cattle_name: cattleDetails.name ?? `Cattle ${collarId}`,
-          latest_record,
-          markerColor: markerColorsRef.current[collarId] ?? '#FF6B6B',
-        };
-      });
-
-      setItems(merged);
-    } catch (err) {
-      console.error('Map fetchAll error:', err);
-      Alert.alert('Network error', 'Could not fetch collar locations.');
-    } finally {
-      setLoading(false);
+      // Force re-render by updating a dummy state or relying on items memoization if it depends on markerColorsRef
+      // Since items depends on markerColorsRef.current, we might need to trigger a state update if items doesn't update automatically
+      // However, items memo dependency includes collarData and cattleMap. 
+      // markerColorsRef is a ref, so changing it won't trigger re-render.
+      // We need to force update.
+      setLoading(prev => prev); // Dummy update to force re-render
+    } catch (e) {
+      console.error('Failed to load custom colors:', e);
     }
-  }, []);
+  }, [cattleMap]);
 
   useFocusEffect(
     useCallback(() => {
       if (cattleList.length === 0 && fetchCattle) {
-          fetchCattle();
+        fetchCattle();
       }
-      fetchAll(true);
-      const interval = setInterval(() => fetchAll(false), POLLING_INTERVAL);
+
+      // Load colors whenever screen focuses or cattle list changes
+      loadColors();
+
+      // Use shared fetch function
+      if (fetchCollarData) {
+        setLoading(true);
+        fetchCollarData().finally(() => setLoading(false));
+      }
+
+      const interval = setInterval(() => {
+        if (fetchCollarData) fetchCollarData();
+      }, POLLING_INTERVAL);
+
       return () => clearInterval(interval);
-    }, [fetchAll, cattleList, fetchCattle])
+    }, [cattleList, fetchCattle, fetchCollarData, loadColors])
   );
+
+  // Auto-focus map when items are populated (only once per session)
+  useEffect(() => {
+    if (!mapHasFocused && items.length > 0) {
+      // Small delay to ensure map is ready
+      const timer = setTimeout(() => {
+        focusOnCattle();
+        setMapHasFocused(true);
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [items, mapHasFocused, setMapHasFocused]);
 
   const focusOnCattle = () => {
     const coords = items.map(i => i.latest_record ? {
@@ -196,23 +205,37 @@ export default function MapScreen() {
   // ⭐️ NEW: Handler to navigate to CowDetailsScreen
   const handleMarkerPress = (mapItem) => {
     // 1. Use the collar_id (or its fallback) to find the full static cattle data
-    const fullCowData = cattleMapRef.current[mapItem.collar_id];
-    
+    const fullCowData = cattleMap[mapItem.collar_id];
+
     if (fullCowData) {
       // 2. Overwrite the static 'latest_record' with the fresh location data from the API
       // This ensures CowDetailsScreen uses the latest location fetched here
       const cowForNavigation = {
-          ...fullCowData,
-          latest_record: mapItem.latest_record || fullCowData.latest_record,
-          collarId: mapItem.collar_id, // Ensure collarId is present
+        ...fullCowData,
+        latest_record: mapItem.latest_record || fullCowData.latest_record,
+        collarId: mapItem.collar_id, // Ensure collarId is present
       };
-      
+
       navigation.navigate('CowDetails', { cow: cowForNavigation });
     } else {
       Alert.alert('Error', 'Could not find complete cattle details for navigation.');
     }
   };
 
+  // ⭐️ NEW: Handler to zoom in on marker long press
+  const handleMarkerLongPress = (coordinate) => {
+    console.log('Long press detected at:', coordinate);
+    if (mapRef.current) {
+      console.log('Animating to region...');
+      mapRef.current.animateToRegion({
+        ...coordinate,
+        latitudeDelta: 0.002, // Slightly larger delta to be safe
+        longitudeDelta: 0.002,
+      }, 1000);
+    } else {
+      console.log('Map ref is null');
+    }
+  };
 
   return (
     <View style={[styles.fullScreen, colorScheme === 'dark' && styles.darkBackground]}>
@@ -224,15 +247,14 @@ export default function MapScreen() {
           showsUserLocation
           showsMyLocationButton
           initialRegion={
-            items.length > 0 && items[0].latest_record
-              ? {
-                latitude: Number(items[0].latest_record.latitude),
-                longitude: Number(items[0].latest_record.longitude),
-                latitudeDelta: 0.02,
-                longitudeDelta: 0.02,
-              }
-              : undefined
+            mapRegion || {
+              latitude: 7.8731,
+              longitude: 80.7718,
+              latitudeDelta: 2,
+              longitudeDelta: 2,
+            }
           }
+          onRegionChangeComplete={(region) => setMapRegion(region)}
         >
           {items.map((item, idx) => {
             if (!item.latest_record) return null;
@@ -241,7 +263,7 @@ export default function MapScreen() {
             if (!isValidCoordinate(lat, lon)) return null;
 
             // Find the full static data to determine if an alert exists
-            const cattleStaticData = cattleMapRef.current[item.collar_id];
+            const cattleStaticData = cattleMap[item.collar_id];
             const isAlert = cattleStaticData?.healthNotes?.toLowerCase()?.includes('alert');
 
 
@@ -250,22 +272,30 @@ export default function MapScreen() {
                 key={item.collar_id ?? item.id ?? idx}
                 identifier={item.collar_id ?? item.id ?? String(idx)}
                 coordinate={{ latitude: lat, longitude: lon }}
-                title={item.cattle_name} 
+                title={item.cattle_name}
                 // ⭐️ CHANGE: Added description to prompt tap for details
-                description={"Tap here for full details"} 
+                description={"Tap here for full details"}
                 // ⭐️ THE FIX: Call the new handler on callout press
                 onCalloutPress={() => handleMarkerPress(item)}
+                // Keep Marker onLongPress as backup, but main logic is in inner TouchableOpacity
+                onLongPress={() => handleMarkerLongPress({ latitude: lat, longitude: lon })}
               >
-                <View style={[
-                    styles.markerIconWrapper, 
-                    { 
-                        backgroundColor: item.markerColor,
-                        // Highlight marker border if static data indicates alert
-                        borderColor: isAlert ? '#FF3B30' : '#fff'
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  onLongPress={() => handleMarkerLongPress({ latitude: lat, longitude: lon })}
+                  onPress={() => { /* Allow default marker press behavior (open callout) */ }}
+                >
+                  <View style={[
+                    styles.markerIconWrapper,
+                    {
+                      backgroundColor: item.markerColor,
+                      // Highlight marker border if static data indicates alert
+                      borderColor: isAlert ? '#FF3B30' : '#fff'
                     }
-                ]}>
-                  <MaterialCommunityIcons name="cow" size={20} color="#fff" />
-                </View>
+                  ]}>
+                    <MaterialCommunityIcons name="cow" size={20} color="#fff" />
+                  </View>
+                </TouchableOpacity>
               </Marker>
             );
           })}
@@ -273,9 +303,9 @@ export default function MapScreen() {
 
         {/* Adjust button container position to account for full screen */}
         <View style={styles.mapTypeButtonContainer}>
-          <TouchableOpacity 
-            style={styles.mapTypeMainButton} 
-            onPress={toggleMapType} 
+          <TouchableOpacity
+            style={styles.mapTypeMainButton}
+            onPress={toggleMapType}
           >
             {renderIcon(mapType, '#fff', 26)}
           </TouchableOpacity>
@@ -302,14 +332,14 @@ export default function MapScreen() {
 }
 
 const styles = StyleSheet.create({
-  fullScreen: { 
-    flex: 1, 
-    backgroundColor: '#F2F7FA' 
+  fullScreen: {
+    flex: 1,
+    backgroundColor: '#F2F7FA'
   },
   darkBackground: { backgroundColor: '#121212' },
   mapTypeButtonContainer: {
     position: 'absolute',
-    bottom: 80, 
+    bottom: 80,
     right: 20,
     zIndex: 20,
     alignItems: 'center',
@@ -347,12 +377,12 @@ const styles = StyleSheet.create({
   emptyText: { fontSize: 16, fontWeight: '600', color: '#333', textAlign: 'center', marginBottom: 6 },
   emptySubText: { fontSize: 13, color: '#666', textAlign: 'center' },
   loaderOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(255,255,255,0.6)', justifyContent: 'center', alignItems: 'center' },
-  markerIconWrapper: { 
-    padding: 6, 
-    borderRadius: 20, 
-    borderWidth: 2, 
-    borderColor: '#fff', 
-    justifyContent: 'center', 
-    alignItems: 'center' 
+  markerIconWrapper: {
+    padding: 6,
+    borderRadius: 20,
+    borderWidth: 2,
+    borderColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center'
   },
 });

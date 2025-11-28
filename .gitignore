@@ -1,11 +1,34 @@
-.expo/
-dist/
-build/
-android/app/build/
-ios/Pods/
+# Dependencies
 node_modules/
-.expo/
+.pnp
+.pnp.js
+
+# Production
 dist/
 build/
+
+# Expo
+.expo/
+web-build/
+
+# Native Build Artifacts
 android/app/build/
+android/.gradle
 ios/Pods/
+ios/build/
+
+# System Files
+.DS_Store
+Thumbs.db
+
+# Debug Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editor directories and files
+.idea
+.vscode
+*.swp
+*.swo

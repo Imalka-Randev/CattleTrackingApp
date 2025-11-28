@@ -7,10 +7,10 @@ export default function HomeScreen() {
   const colorScheme = useColorScheme();
 
   return (
-    <SafeAreaView 
+    <SafeAreaView
       style={[styles.safeArea, colorScheme === 'dark' && styles.darkBackground]}
       // ✅ FIX: Explicitly set edges to exclude 'bottom'.
-      edges={['top', 'left', 'right']} 
+      edges={['top', 'left', 'right']}
     >
       <TopTabNavigator />
     </SafeAreaView>

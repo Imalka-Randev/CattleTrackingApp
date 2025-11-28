@@ -18,8 +18,9 @@ import CattleCard from '../component/CattleCard';
 import FilterScreen from './FilterScreen';
 import { UserContext } from '../context/UserContext';
 
+
 export default function CattleListScreen() {
-  const { user, cattleList, fetchCattle, cattleLoading } = useContext(UserContext);
+  const { user, cattleList, fetchCattle, cattleLoading, collarData, fetchCollarData } = useContext(UserContext);
   const userId = user?.userId || user?.id || null;
 
   const [displayList, setDisplayList] = useState([]);
@@ -37,7 +38,7 @@ export default function CattleListScreen() {
     staticCattleRef.current = cattleList || [];
   }, [cattleList]);
 
-  // INITIAL load from context
+  // INITIAL load from context + Fetch Collar Data
   useEffect(() => {
     let mounted = true;
 
@@ -50,6 +51,11 @@ export default function CattleListScreen() {
         const initial = cattleList || staticCattleRef.current || [];
         setDisplayList(initial);
         setFilteredCattleList(initial);
+
+        // Fetch dynamic data using context function
+        if (fetchCollarData) {
+          fetchCollarData();
+        }
       } catch (e) {
         console.log("CattleList init error", e);
       } finally {
@@ -62,7 +68,7 @@ export default function CattleListScreen() {
     }
 
     return () => { mounted = false };
-  }, [userId, cattleList, fetchCattle]);
+  }, [userId, cattleList, fetchCattle, fetchCollarData]);
 
   // SEARCH + FILTER only on static data
   const applySearchAndFilter = (q, tempFilter, sourceList = displayList) => {
@@ -126,22 +132,40 @@ export default function CattleListScreen() {
         {(loading || cattleLoading) ? (
           <ActivityIndicator size="large" color="#4F8EF7" />
         ) : (
-          filteredCattleList.map(item => (
-            <TouchableOpacity
-              key={(item.id || item.cattleId) + ''}
-              onPress={() => navigation.navigate('CowDetails', { cow: item })}
-              activeOpacity={0.7}
-            >
-              <CattleCard
-                cattleId={item.cattleId || item.id}
-                name={item.cattle_name || item.name}
-                breed={item.breed}
-                age={item.age}
-                healthNotes={item.healthNotes || "No health data"}
-                cattlePhoto={item.cattle_photo || item.Image}
-              />
-            </TouchableOpacity>
-          ))
+          filteredCattleList.map(item => {
+            const lookupKey = String(item.collarId || item.id).trim();
+            const cData = collarData[lookupKey];
+
+            // Debug log for the first few items to avoid spam
+            if (filteredCattleList.indexOf(item) < 3) {
+              console.log(`[CattleList] Rendering ${item.cattle_name} (ID: ${lookupKey})`);
+              console.log(`[CattleList] Data found:`, JSON.stringify(cData, null, 2));
+            }
+
+            return (
+              <TouchableOpacity
+                key={(item.id || item.cattleId) + ''}
+                onPress={() => navigation.navigate('CowDetails', { cow: item })}
+                activeOpacity={0.7}
+              >
+                <CattleCard
+                  cattleId={item.cattleId || item.id}
+                  name={item.cattle_name || item.name}
+                  breed={item.breed}
+                  age={item.age}
+                  healthNotes={item.healthNotes || "No health data"}
+                  cattlePhoto={item.cattle_photo || item.Image}
+                  // ⭐️ NEW: Pass dynamic status and last seen from context
+                  collarOnline={cData?.status === 'activated'}
+                  lastSeen={cData?.lastSeen}
+                  rssi={cData?.lora_rssi}
+                  gsmRssi={cData?.gsm_rssi}
+                  batteryVoltage={cData?.__v}
+                  type={cData?.type}
+                />
+              </TouchableOpacity>
+            );
+          })
         )}
 
         {!loading && !cattleLoading && filteredCattleList.length === 0 && (

@@ -25,9 +25,11 @@ export default function CattleCard({
   cattlePhoto,
   collarOnline = false,
   rssi = null,
+  gsmRssi = null, // New prop
   batteryVoltage = null,
   motionDetected = null,
-  lastSeen = null, // New prop for last seen timestamp
+  lastSeen = null,
+  type = 'slave', // New prop, default to slave
 }) {
   const [color, setColor] = useState('#4F8EF7');
   const [modalVisible, setModalVisible] = useState(false);
@@ -67,16 +69,19 @@ export default function CattleCard({
     ? Math.min(Math.max((batteryVoltage - 3.0) / 1.2, 0), 1)
     : 0;
 
-  const getSignalBars = (rssi) => {
-    if (rssi == null) return 0;
-    if (rssi >= -50) return 4;
-    if (rssi >= -70) return 3;
-    if (rssi >= -90) return 2;
-    if (rssi >= -1) return 1;
+  // Logic: If master, use GSM RSSI. If slave (or other), use LoRa RSSI.
+  const displayRssi = type === 'master' ? gsmRssi : rssi;
+
+  const getSignalBars = (val) => {
+    if (val == null) return 0;
+    if (val >= -50) return 4;
+    if (val >= -70) return 3;
+    if (val >= -90) return 2;
+    if (val >= -120) return 1; // Expanded range for weak signal
     return 0;
   };
 
-  const signalBars = getSignalBars(rssi);
+  const signalBars = getSignalBars(displayRssi);
 
   const renderSignalBars = () => (
     <View style={styles.signalWrapper}>
@@ -88,6 +93,7 @@ export default function CattleCard({
             {
               opacity: i <= signalBars ? 1 : 0.2,
               height: 4 * i,
+              backgroundColor: i <= signalBars ? (type === 'master' ? '#4F8EF7' : '#333') : '#ccc'
             },
           ]}
         />
@@ -123,11 +129,11 @@ export default function CattleCard({
 
   const formattedLastSeen = lastSeen
     ? (() => {
-        const d = new Date(lastSeen);
-        return isNaN(d.getTime())
-          ? 'Unknown'
-          : d.toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
-      })()
+      const d = new Date(lastSeen);
+      return isNaN(d.getTime())
+        ? 'Unknown'
+        : d.toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
+    })()
     : 'Unknown';
 
   return (

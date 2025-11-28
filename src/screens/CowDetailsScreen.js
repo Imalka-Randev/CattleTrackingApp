@@ -1,5 +1,5 @@
 // src/screens/CowDetailsScreen.js
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useContext } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,7 @@ import { useRoute, useNavigation } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage'; // <--- NEW IMPORT
 import { Ionicons, MaterialCommunityIcons, FontAwesome5 } from '@expo/vector-icons'; // Ensure MaterialCommunityIcons is imported
 import api from '../api/apiClient';
+import { UserContext } from '../context/UserContext';
 
 import BatteryIndicator from '../component/BatteryIndicator';
 import SignalIndicator from '../component/SignalIndicator';
@@ -27,7 +28,8 @@ export default function CowDetailsScreen() {
   const { cow } = route.params || {};
 
   // local state for API collar-data
-  const [apiData, setApiData] = useState(null);
+  const { collarData, updateCollarData } = useContext(UserContext);
+  // const [apiData, setApiData] = useState(null); // REMOVED: using shared state
   const [trail, setTrail] = useState([]);
   const [mapType, setMapType] = useState('satellite'); // default to 'satellite'
   const [markerColor, setMarkerColor] = useState('#4F8EF7'); // <--- NEW STATE for custom color
@@ -104,10 +106,12 @@ export default function CowDetailsScreen() {
       try {
         const res = await api.get(`/api/collar-data/${deviceId}`);
         const d = res?.data ?? null;
-        if (mounted) setApiData(d);
+        if (mounted && d) {
+          updateCollarData(deviceId, d);
+        }
       } catch (err) {
         // intentionally silent: do not show error to user, just keep previous data
-        if (mounted) setApiData(null);
+        // if (mounted) setApiData(null); // Don't clear shared state on error
       }
     };
 
@@ -122,6 +126,7 @@ export default function CowDetailsScreen() {
   }, [deviceId]);
 
   // Extract API fields (if available)
+  const apiData = collarData[deviceId] || null; // Derived from shared state
   const apiLastLocation = apiData?.lastLocation ?? null; // { lat, lon, timestamp }
   const apiVoltageRaw = apiData?.__v ?? null; // use __v as voltage (0..5)
   const apiLastSeen = apiData?.lastSeen ?? apiData?.lastLocation?.timestamp ?? null;
@@ -166,7 +171,8 @@ export default function CowDetailsScreen() {
     latitude != null &&
     longitude != null &&
     !isNaN(Number(latitude)) &&
-    !isNaN(Number(longitude));
+    !isNaN(Number(longitude)) &&
+    !(Math.abs(Number(latitude)) < 0.0001 && Math.abs(Number(longitude)) < 0.0001);
 
   // ---- Maintain movement trail (last 10 points) ----
   useEffect(() => {
