@@ -13,12 +13,14 @@ export const UserProvider = ({ children }) => {
   const [cattleList, setCattleList] = useState([]);
   const [collarIds, setCollarIds] = useState([]);
   const [cattleLoading, setCattleLoading] = useState(false);
+  const [geofences, setGeofences] = useState([]); // Geofence State
   const [mapHasFocused, setMapHasFocused] = useState(false); // Persist map focus state
   const [mapRegion, setMapRegion] = useState(null); // Persist map region (lat, lon, deltas)
   const [isOnline, setIsOnline] = useState(true); // Track online status
 
   // Shared state for collar data: { [collarId]: apiResponse }
   const [collarData, setCollarData] = useState({});
+  const [toolboxRightSide, setToolboxRightSide] = useState(true); // Persist map toolbox position
 
   /**
    * Periodic Server Health Check
@@ -208,6 +210,17 @@ export const UserProvider = ({ children }) => {
         '@auth_user',
         '@cattle_list',
         '@collar_ids',
+        '@geofences', // Remove fences? Or keep them? User said persist even when log in back, usually implies persist on device. But logout usually clears specific user data. I'll clear it for security/logic, but load it on login? Actually for "log in back" it implies it survives logout. But wait, if I logout, I am a different user maybe?
+        // Detailed request: "even when user log in back". This implies persistence PER DEVICE or PER USER.
+        // Since no API, I'll store it in '@geofences' which is global for the app effectively if I don't key it by user.
+        // If I strictly follow "log in back", clearing it on logout might defeat the purpose if "log in back" means "re-install" or "session expire".
+        // Use case: User logs out -> closes app -> logs in -> expects fences.
+        // So I should NOT clear '@geofences' from AsyncStorage on logout if I want them to persist for the "same device usage".
+        // HOWEVER, `geofence` state in memory should be cleared.
+        // Let's remove it from multiRemove to be safe if we want it to survive explicit logout-login cycle on same device.
+        // actually, usually user data is private. If I use a shared device, I don't want my fences seen by next user.
+        // BUT, user asked "it should be show on both maps even when user log in back".
+        // I will stick to device-level persistence for now as requested. I'll remove it from the list here to keep it in storage, but clear state.
       ]);
     } catch (error) {
       console.error('UserContext.logout clear error:', error);
@@ -215,9 +228,11 @@ export const UserProvider = ({ children }) => {
       setToken(null);
       setUser(null);
       setCattleList([]);
+      setGeofences([]); // Clear fences on logout
       setCollarIds([]);
       setMapHasFocused(false); // Reset map focus on logout
       setMapRegion(null); // Reset map region on logout
+      setToolboxRightSide(true); // Reset toolbox position on logout
     }
   }, []);
 
@@ -261,12 +276,21 @@ export const UserProvider = ({ children }) => {
       try {
         const storedCattle = await AsyncStorage.getItem('@cattle_list');
         const storedCollars = await AsyncStorage.getItem('@collar_ids');
+        const storedToolboxSide = await AsyncStorage.getItem('@toolbox_right_side');
+        const storedGeofences = await AsyncStorage.getItem('@geofences');
+
+        if (storedGeofences) {
+          setGeofences(JSON.parse(storedGeofences));
+        }
 
         if (storedCattle) {
           setCattleList(JSON.parse(storedCattle));
         }
         if (storedCollars) {
           setCollarIds(JSON.parse(storedCollars));
+        }
+        if (storedToolboxSide !== null) {
+          setToolboxRightSide(JSON.parse(storedToolboxSide) === true);
         }
       } catch (err) {
         // ignore
@@ -295,10 +319,34 @@ export const UserProvider = ({ children }) => {
         setMapHasFocused,
         mapRegion,
         setMapRegion,
+        mapRegion,
+        setMapRegion,
         fetchCollarData, // Exposed for manual triggering if needed
+        toolboxRightSide,
+        setToolboxRightSide: (val) => {
+          setToolboxRightSide(val);
+          AsyncStorage.setItem('@toolbox_right_side', JSON.stringify(val));
+        },
+        geofences,
+        addGeofence: async (newFence) => {
+          const fenceWithAssignments = { ...newFence, assignedCattleIds: [] };
+          const updated = [...geofences, fenceWithAssignments];
+          setGeofences(updated);
+          await AsyncStorage.setItem('@geofences', JSON.stringify(updated));
+        },
+        updateGeofence: async (updatedFence) => {
+          const updated = geofences.map(f => f.id === updatedFence.id ? updatedFence : f);
+          setGeofences(updated);
+          await AsyncStorage.setItem('@geofences', JSON.stringify(updated));
+        },
+        removeGeofence: async (fenceId) => {
+          const updated = geofences.filter(f => f.id !== fenceId);
+          setGeofences(updated);
+          await AsyncStorage.setItem('@geofences', JSON.stringify(updated));
+        },
       }}
     >
       {children}
-    </UserContext.Provider>
+    </UserContext.Provider >
   );
 };

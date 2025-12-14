@@ -8,6 +8,9 @@ import {
   Image,
   Dimensions,
   TouchableOpacity,
+  Linking,
+  Platform,
+  Alert,
 } from 'react-native';
 import MapView, { Marker, Polyline } from 'react-native-maps';
 import { useRoute, useNavigation } from '@react-navigation/native';
@@ -255,6 +258,29 @@ export default function CowDetailsScreen() {
     });
   };
 
+  const handleNavigateToCattle = () => {
+    if (!locationAvailable) {
+      Alert.alert('Location Missing', 'Cannot navigate because the cattle location is not available.');
+      return;
+    }
+
+    const lat = Number(latitude);
+    const lng = Number(longitude);
+    const label = name || 'Cattle';
+
+    const scheme = Platform.select({ ios: 'maps:0,0?q=', android: 'geo:0,0?q=' });
+    const latLng = `${lat},${lng}`;
+    const url = Platform.select({
+      ios: `${scheme}${label}@${latLng}`,
+      android: `${scheme}${latLng}(${label})`
+    });
+
+    Linking.openURL(url).catch(err => {
+      console.error('An error occurred', err);
+      Alert.alert('Error', 'Could not open map application.');
+    });
+  };
+
   return (
     <View style={{ flex: 1 }}>
       <ScrollView contentContainerStyle={styles.container}>
@@ -312,6 +338,17 @@ export default function CowDetailsScreen() {
 
             {/* Floating controls over the map */}
             <View style={styles.mapTypeButtonContainer}>
+              {/* 
+                NAVIGATE BUTTON 
+                Opens external maps (Apple Maps on iOS, Google Maps on Android)
+              */}
+              <TouchableOpacity
+                style={[styles.mapTypeMainButton, { backgroundColor: '#34C759', marginBottom: 8 }]}
+                onPress={handleNavigateToCattle}
+              >
+                <MaterialCommunityIcons name="navigation-variant" size={22} color="#fff" />
+              </TouchableOpacity>
+
               <TouchableOpacity
                 style={styles.mapTypeMainButton}
                 onPress={toggleMapType}

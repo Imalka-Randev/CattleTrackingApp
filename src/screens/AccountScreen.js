@@ -13,6 +13,7 @@ import {
   Alert
 } from 'react-native';
 import { Ionicons, Feather, MaterialIcons } from '@expo/vector-icons';
+import { UserContext } from '../context/UserContext';
 
 export default function AccountScreen() {
   const colorScheme = useColorScheme();
@@ -57,6 +58,8 @@ export default function AccountScreen() {
     premium: '#F39C12'
   };
 
+  const { logout } = React.useContext(UserContext);
+
   // Handlers for actions
   const handleLogout = () => {
     Alert.alert(
@@ -64,7 +67,19 @@ export default function AccountScreen() {
       'Are you sure you want to sign out?',
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Sign Out', style: 'destructive', onPress: () => console.log('User signed out') }
+        {
+          text: 'Sign Out',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await logout();
+              console.log('User signed out successfully');
+            } catch (error) {
+              console.error('Logout failed:', error);
+              Alert.alert('Error', 'Failed to log out. Please try again.');
+            }
+          }
+        }
       ]
     );
   };
@@ -87,7 +102,7 @@ export default function AccountScreen() {
 
   return (
     <View style={[styles.safeArea, { backgroundColor: colors.bg }]}>
-      <ScrollView 
+      <ScrollView
         contentContainerStyle={styles.container}
         showsVerticalScrollIndicator={false}
       >
@@ -95,8 +110,8 @@ export default function AccountScreen() {
         <View style={[styles.profileCard, { backgroundColor: colors.card }]}>
           <View style={styles.profileHeader}>
             <View style={styles.avatarContainer}>
-              <Image 
-                source={{ uri: user.avatar }} 
+              <Image
+                source={{ uri: user.avatar }}
                 style={styles.avatar}
                 resizeMode="cover"
               />
@@ -104,7 +119,7 @@ export default function AccountScreen() {
                 <Ionicons name="star" size={12} color="#fff" />
               </View>
             </View>
-            
+
             <View style={styles.profileInfo}>
               <View style={styles.nameRow}>
                 <Text style={[styles.profileName, { color: colors.text }]}>{user.name}</Text>
@@ -112,33 +127,33 @@ export default function AccountScreen() {
                   <Text style={[styles.badgeText, { color: colors.premium }]}>{user.role}</Text>
                 </View>
               </View>
-              
+
               <Text style={[styles.profileMeta, { color: colors.subText }]}>
                 <Ionicons name="calendar" size={12} color={colors.subText} /> {user.joinDate}
               </Text>
-              
+
               <View style={styles.farmInfo}>
                 <Ionicons name="business" size={14} color={colors.primary} />
                 <Text style={[styles.farmName, { color: colors.text }]}>{user.farm}</Text>
               </View>
-              
+
               <View style={styles.locationInfo}>
                 <Ionicons name="location" size={14} color={colors.primary} />
                 <Text style={[styles.locationText, { color: colors.subText }]}>{user.location}</Text>
               </View>
             </View>
           </View>
-          
+
           {/* Enhanced stats with progress indicators */}
           <View style={styles.profileStats}>
             <View style={styles.statItem}>
               <Text style={[styles.statValue, { color: colors.text }]}>{user.totalCattle}</Text>
               <Text style={[styles.statLabel, { color: colors.subText }]}>Total Cattle</Text>
               <View style={styles.progressBar}>
-                <View 
+                <View
                   style={[
-                    styles.progressFill, 
-                    { 
+                    styles.progressFill,
+                    {
                       width: `${(user.activeCollars / user.totalCattle) * 100}%`,
                       backgroundColor: colors.primary
                     }
@@ -146,15 +161,15 @@ export default function AccountScreen() {
                 />
               </View>
             </View>
-            
+
             <View style={styles.statItem}>
               <Text style={[styles.statValue, { color: colors.text }]}>{user.activeCollars}</Text>
               <Text style={[styles.statLabel, { color: colors.subText }]}>Active Collars</Text>
               <View style={styles.progressBar}>
-                <View 
+                <View
                   style={[
-                    styles.progressFill, 
-                    { 
+                    styles.progressFill,
+                    {
                       width: `${(user.activeCollars / user.totalCattle) * 100}%`,
                       backgroundColor: colors.primary
                     }
@@ -162,15 +177,15 @@ export default function AccountScreen() {
                 />
               </View>
             </View>
-            
+
             <View style={styles.statItem}>
               <Text style={[styles.statValue, { color: colors.text }]}>98%</Text>
               <Text style={[styles.statLabel, { color: colors.subText }]}>Health Rate</Text>
               <View style={styles.progressBar}>
-                <View 
+                <View
                   style={[
-                    styles.progressFill, 
-                    { 
+                    styles.progressFill,
+                    {
                       width: '98%',
                       backgroundColor: colors.success
                     }
@@ -189,7 +204,7 @@ export default function AccountScreen() {
               <Text style={[styles.editText, { color: colors.primary }]}>Edit</Text>
             </TouchableOpacity>
           </View>
-          
+
           <View style={styles.infoGrid}>
             <View style={styles.infoGridItem}>
               <Ionicons name="map" size={20} color={colors.primary} style={styles.infoIcon} />
@@ -198,7 +213,7 @@ export default function AccountScreen() {
                 <Text style={[styles.infoValue, { color: colors.text }]}>{user.farmSize}</Text>
               </View>
             </View>
-            
+
             <View style={styles.infoGridItem}>
               <Ionicons name="paw" size={20} color={colors.primary} style={styles.infoIcon} />
               <View style={styles.infoContent}>
@@ -207,9 +222,9 @@ export default function AccountScreen() {
               </View>
             </View>
           </View>
-          
+
           <View style={styles.divider} />
-          
+
           <View style={styles.infoItem}>
             <Ionicons name="mail" size={20} color={colors.primary} style={styles.infoIcon} />
             <View style={styles.infoContent}>
@@ -217,7 +232,7 @@ export default function AccountScreen() {
               <Text style={[styles.infoValue, { color: colors.text }]}>{user.email}</Text>
             </View>
           </View>
-          
+
           <View style={styles.infoItem}>
             <Ionicons name="call" size={20} color={colors.primary} style={styles.infoIcon} />
             <View style={styles.infoContent}>
@@ -230,7 +245,7 @@ export default function AccountScreen() {
         {/* Subscription Information */}
         <View style={[styles.sectionCard, { backgroundColor: colors.card }]}>
           <Text style={[styles.sectionTitle, { color: colors.accent }]}>Subscription</Text>
-          
+
           <View style={styles.subscriptionItem}>
             <Ionicons name="card" size={20} color={colors.warning} style={styles.infoIcon} />
             <View style={styles.infoContent}>
@@ -238,7 +253,7 @@ export default function AccountScreen() {
               <Text style={[styles.infoValue, { color: colors.text }]}>{user.subscription}</Text>
             </View>
           </View>
-          
+
           <View style={styles.subscriptionItem}>
             <Ionicons name="calendar" size={20} color={colors.warning} style={styles.infoIcon} />
             <View style={styles.infoContent}>
@@ -246,7 +261,7 @@ export default function AccountScreen() {
               <Text style={[styles.infoValue, { color: colors.text }]}>{user.subscriptionRenewal}</Text>
             </View>
           </View>
-          
+
           <TouchableOpacity style={styles.upgradeButton}>
             <Text style={styles.upgradeButtonText}>Upgrade Plan</Text>
           </TouchableOpacity>
@@ -255,8 +270,8 @@ export default function AccountScreen() {
         {/* Account Settings with better organization */}
         <View style={[styles.sectionCard, { backgroundColor: colors.card }]}>
           <Text style={[styles.sectionTitle, { color: colors.accent }]}>Preferences</Text>
-          
-          <TouchableOpacity 
+
+          <TouchableOpacity
             style={styles.settingItem}
             onPress={handleEditProfile}
           >
@@ -268,7 +283,7 @@ export default function AccountScreen() {
             </View>
             <Ionicons name="chevron-forward" size={18} color={colors.subText} />
           </TouchableOpacity>
-          
+
           <TouchableOpacity style={styles.settingItem}>
             <View style={styles.settingLeft}>
               <View style={[styles.settingIconContainer, { backgroundColor: `${colors.primary}20` }]}>
@@ -278,7 +293,7 @@ export default function AccountScreen() {
             </View>
             <Ionicons name="chevron-forward" size={18} color={colors.subText} />
           </TouchableOpacity>
-          
+
           <View style={styles.settingItem}>
             <View style={styles.settingLeft}>
               <View style={[styles.settingIconContainer, { backgroundColor: `${colors.primary}20` }]}>
@@ -286,7 +301,7 @@ export default function AccountScreen() {
               </View>
               <Text style={[styles.settingLabel, { color: colors.text }]}>Language</Text>
             </View>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={[styles.languageButton, { backgroundColor: `${colors.primary}10` }]}
               onPress={() => setLanguage(language === 'en' ? 'si' : 'en')}
             >
@@ -296,7 +311,7 @@ export default function AccountScreen() {
               <Ionicons name="chevron-down" size={14} color={colors.primary} />
             </TouchableOpacity>
           </View>
-          
+
           <View style={styles.settingItem}>
             <View style={styles.settingLeft}>
               <View style={[styles.settingIconContainer, { backgroundColor: `${colors.primary}20` }]}>
@@ -311,7 +326,7 @@ export default function AccountScreen() {
               trackColor={{ false: colors.border, true: `${colors.primary}50` }}
             />
           </View>
-          
+
           <View style={styles.settingItem}>
             <View style={styles.settingLeft}>
               <View style={[styles.settingIconContainer, { backgroundColor: `${colors.primary}20` }]}>
@@ -331,8 +346,8 @@ export default function AccountScreen() {
         {/* Support Section with actual links */}
         <View style={[styles.sectionCard, { backgroundColor: colors.card }]}>
           <Text style={[styles.sectionTitle, { color: colors.accent }]}>Support</Text>
-          
-          <TouchableOpacity 
+
+          <TouchableOpacity
             style={styles.settingItem}
             onPress={openHelpCenter}
           >
@@ -344,8 +359,8 @@ export default function AccountScreen() {
             </View>
             <Ionicons name="chevron-forward" size={18} color={colors.subText} />
           </TouchableOpacity>
-          
-          <TouchableOpacity 
+
+          <TouchableOpacity
             style={styles.settingItem}
             onPress={openTerms}
           >
@@ -357,8 +372,8 @@ export default function AccountScreen() {
             </View>
             <Ionicons name="chevron-forward" size={18} color={colors.subText} />
           </TouchableOpacity>
-          
-          <TouchableOpacity 
+
+          <TouchableOpacity
             style={styles.settingItem}
             onPress={openPrivacy}
           >
@@ -370,7 +385,7 @@ export default function AccountScreen() {
             </View>
             <Ionicons name="chevron-forward" size={18} color={colors.subText} />
           </TouchableOpacity>
-          
+
           <TouchableOpacity style={styles.settingItem}>
             <View style={styles.settingLeft}>
               <View style={[styles.settingIconContainer, { backgroundColor: `${colors.info}20` }]}>
@@ -386,7 +401,7 @@ export default function AccountScreen() {
         <Text style={[styles.versionText, { color: colors.subText }]}>MooMap v1.0.1</Text>
 
         {/* Logout Button with confirmation */}
-        <TouchableOpacity 
+        <TouchableOpacity
           style={[styles.logoutButton, { backgroundColor: colors.card }]}
           onPress={handleLogout}
         >
@@ -396,7 +411,7 @@ export default function AccountScreen() {
       </ScrollView>
 
       {/* Floating Action Button */}
-      <TouchableOpacity 
+      <TouchableOpacity
         style={[styles.fab, { backgroundColor: colors.primary }]}
         onPress={handleEditProfile}
       >

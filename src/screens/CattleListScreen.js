@@ -156,7 +156,7 @@ export default function CattleListScreen() {
                   healthNotes={item.healthNotes || "No health data"}
                   cattlePhoto={item.cattle_photo || item.Image}
                   // ⭐️ NEW: Pass dynamic status and last seen from context
-                  collarOnline={cData?.status === 'activated'}
+                  collarOnline={cData?.status === 'active'}
                   lastSeen={cData?.lastSeen}
                   rssi={cData?.lora_rssi}
                   gsmRssi={cData?.gsm_rssi}

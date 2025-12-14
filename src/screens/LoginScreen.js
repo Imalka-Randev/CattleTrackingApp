@@ -27,8 +27,8 @@ export default function LoginScreen() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
 
-  const [userId, setUserId] = useState('0714567890');
-  const [password, setPassword] = useState('mypassword123');
+  const [userId, setUserId] = useState('0771234567');
+  const [password, setPassword] = useState('12345678');
   const [isLoading, setIsLoading] = useState(false);
   const [secureTextEntry, setSecureTextEntry] = useState(true);
 

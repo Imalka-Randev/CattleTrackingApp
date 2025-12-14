@@ -154,9 +154,9 @@ const styles = StyleSheet.create({
 
   tabBarWrapper: {
     maxHeight: BUTTON_HEIGHT + 16,
-    backgroundColor: "#FFFDF6",
+    backgroundColor: "#ffffff6f",
     borderBottomWidth: 1,
-    borderBottomColor: "#E0D7C6",
+    borderBottomColor: "#ffffffff",
   },
   darkTabBarWrapper: {
     backgroundColor: '#1E1E1E',

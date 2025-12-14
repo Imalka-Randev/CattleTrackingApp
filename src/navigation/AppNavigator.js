@@ -5,6 +5,7 @@ import LoginScreen from '../screens/LoginScreen';
 import RegisterScreen from '../screens/RegisterScreen';
 import BottomTabNavigator from './BottomTabNavigator';
 import CowDetailsScreen from '../screens/CowDetailsScreen';
+import FenceTestMapScreen from '../screens/FenceTestMapScreen';
 
 import { UserContext } from '../context/UserContext';
 
@@ -23,6 +24,7 @@ export default function AppNavigator() {
             component={CowDetailsScreen}
             options={{ presentation: 'modal' }}
           />
+          <Stack.Screen name="FenceTestMap" component={FenceTestMapScreen} />
         </>
       ) : (
         <>
